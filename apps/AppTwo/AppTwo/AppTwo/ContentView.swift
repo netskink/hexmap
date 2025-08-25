@@ -6,16 +6,21 @@
 //
 
 import SwiftUI
+// from shared code in this repo
+import SharedKit
 
 struct ContentView: View {
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
+        VStack(spacing: 12) {
             Text("AppTwo")
+            Text("Shared: " + AppInfo.prettyName())
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
         .padding()
+        .onAppear {
+            Log.info("AppTwo appeared")
+        }
     }
 }
 

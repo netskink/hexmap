@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		720DB6D22E5D175A008B0A89 /* SharedKit in Frameworks */ = {isa = PBXBuildFile; productRef = 720DB6D12E5D175A008B0A89 /* SharedKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		720DB6B62E5CB8ED008B0A89 /* AppTwo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AppTwo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				720DB6D22E5D175A008B0A89 /* SharedKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = AppTwo;
 			packageProductDependencies = (
+				720DB6D12E5D175A008B0A89 /* SharedKit */,
 			);
 			productName = AppTwo;
 			productReference = 720DB6B62E5CB8ED008B0A89 /* AppTwo.app */;
@@ -94,6 +100,9 @@
 			);
 			mainGroup = 720DB6AD2E5CB8ED008B0A89;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				720DB6D02E5D175A008B0A89 /* XCLocalSwiftPackageReference "../../../shared/SharedKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 720DB6B72E5CB8ED008B0A89 /* Products */;
 			projectDirPath = "";
@@ -324,6 +333,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		720DB6D02E5D175A008B0A89 /* XCLocalSwiftPackageReference "../../../shared/SharedKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../../shared/SharedKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		720DB6D12E5D175A008B0A89 /* SharedKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SharedKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 720DB6AE2E5CB8ED008B0A89 /* Project object */;
 }

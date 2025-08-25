@@ -6,6 +6,8 @@
 //
 
 import SwiftUI
+// This is from the shared folder in this workspace
+import SharedKit
 
 struct ContentView: View {
     var body: some View {
@@ -14,8 +16,12 @@ struct ContentView: View {
                 .imageScale(.large)
                 .foregroundStyle(.tint)
             Text("AppOne")
+            Text("Shared: " + AppInfo.prettyName())
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
         .padding()
+        .onAppear { Log.info("AppOne appeared")}
     }
 }
 
