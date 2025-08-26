@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		720DB6D22E5D175A008B0A89 /* SharedKit in Frameworks */ = {isa = PBXBuildFile; productRef = 720DB6D12E5D175A008B0A89 /* SharedKit */; };
+		7275307E2E5DE1CB00C46015 /* MySharedLib in Frameworks */ = {isa = PBXBuildFile; productRef = 7275307D2E5DE1CB00C46015 /* MySharedLib */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				720DB6D22E5D175A008B0A89 /* SharedKit in Frameworks */,
+				7275307E2E5DE1CB00C46015 /* MySharedLib in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +73,7 @@
 			name = AppTwo;
 			packageProductDependencies = (
 				720DB6D12E5D175A008B0A89 /* SharedKit */,
+				7275307D2E5DE1CB00C46015 /* MySharedLib */,
 			);
 			productName = AppTwo;
 			productReference = 720DB6B62E5CB8ED008B0A89 /* AppTwo.app */;
@@ -102,6 +105,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				720DB6D02E5D175A008B0A89 /* XCLocalSwiftPackageReference "../../../shared/SharedKit" */,
+				7275307C2E5DE1CB00C46015 /* XCLocalSwiftPackageReference "../../../shared/MySharedLib" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 720DB6B72E5CB8ED008B0A89 /* Products */;
@@ -341,12 +345,20 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = ../../../shared/SharedKit;
 		};
+		7275307C2E5DE1CB00C46015 /* XCLocalSwiftPackageReference "../../../shared/MySharedLib" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../../shared/MySharedLib;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		720DB6D12E5D175A008B0A89 /* SharedKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SharedKit;
+		};
+		7275307D2E5DE1CB00C46015 /* MySharedLib */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MySharedLib;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

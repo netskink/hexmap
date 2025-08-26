@@ -1,6 +1,8 @@
 
 import SpriteKit
 import GameplayKit
+// from shared code in this repo
+import SharedKit
 
 final class HexScene: SKScene {
 
@@ -19,6 +21,7 @@ final class HexScene: SKScene {
     override func didMove(to view: SKView) {
         backgroundColor = .black
         buildMap()
+        Log.info("xxxxx")
     }
 
     // MARK: - Map generation

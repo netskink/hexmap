@@ -8,6 +8,8 @@
 import SwiftUI
 // from shared code in this repo
 import SharedKit
+// from the other shared library
+import MySharedLib
 
 struct ContentView: View {
     var body: some View {
@@ -20,6 +22,9 @@ struct ContentView: View {
         .padding()
         .onAppear {
             Log.info("AppTwo appeared")
+            Log.error(MySharedLibrary.testy())
+            Log.warn("warn")
+            Log.info("info")
         }
     }
 }

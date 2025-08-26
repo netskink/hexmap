@@ -2,6 +2,9 @@
 <Workspace
    version = "1.0">
    <FileRef
+      location = "group:shared/MySharedLib">
+   </FileRef>
+   <FileRef
       location = "group:apps/HexMap/hexmap.xcodeproj">
    </FileRef>
    <FileRef
