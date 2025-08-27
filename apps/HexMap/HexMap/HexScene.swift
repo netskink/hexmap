@@ -15,25 +15,36 @@ final class HexScene: SKScene {
     private static let sqrt3: CGFloat = 1.7320508075688772
 
     private var selected: SKShapeNode?
+    
+    // This is a computed property that is used in buildMap()
     private lazy var hexPath: CGPath = HexScene.buildHexPath(size: hexSize, pointy: pointyTop)
 
     // MARK: - Scene lifecycle
     override func didMove(to view: SKView) {
+
+        Log.info("-- didMove() --")
+
         backgroundColor = .black
         buildMap()
-        Log.info("xxxxx")
     }
 
     // MARK: - Map generation
     private func buildMap() {
+        
+        // called from didMove()
+        Log.info("-- buildMap() --")
+        
         // Hex "disc" (nice for demos). For a rectangular map, loop rows/cols instead.
         for q in -mapRadius...mapRadius {
             let rMin = max(-mapRadius, -q - mapRadius)
             let rMax = min(mapRadius, -q + mapRadius)
             for r in rMin...rMax {
+                
+                
                 let p = axialToPixel(q: CGFloat(q), r: CGFloat(r))
                 let center = CGPoint(x: size.width/2 + p.x, y: size.height/2 + p.y)
 
+                // The computed property for hexPath is called for the first time
                 let node = SKShapeNode(path: hexPath)
                 node.position = center
                 node.lineWidth = 1.0
@@ -48,6 +59,9 @@ final class HexScene: SKScene {
 
     // MARK: - Touch handling
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+
+        Log.info("-- touchesBegan() --")
+
         guard let t = touches.first else { return }
         let p = t.location(in: self)
 
@@ -69,11 +83,19 @@ final class HexScene: SKScene {
         }
     }
 
+    // Neighbors (axial, pointy or flat): [(+1,0),(+1,-1),(0,-1),(-1,0),(-1,+1),(0,+1)].
+    
+    
     // MARK: - Naming helper
     private func tileName(q: Int, r: Int) -> String { "hex_\(q)_\(r)" }
 
     // MARK: - Geometry
     private static func buildHexPath(size: CGFloat, pointy: Bool) -> CGPath {
+
+        // This is called when the first hex tile is added.  The hexPath is
+        // a computed property.
+        Log.info("-- buildHexPath() --")
+
         let path = CGMutablePath()
         for i in 0..<6 {
             // Pointy-top: -30° offset; Flat-top: 0°
@@ -93,6 +115,11 @@ final class HexScene: SKScene {
     // x = s * sqrt(3) * (q + r/2)
     // y = s * 3/2 * r
     private func axialToPixel(q: CGFloat, r: CGFloat) -> CGPoint {
+        
+        // called from buildMap()
+        //Log.info("-- axialToPixel() --")
+
+        
         if pointyTop {
             let x = hexSize * HexScene.sqrt3 * (q + r * 0.5)
             let y = hexSize * 1.5 * r
@@ -109,6 +136,11 @@ final class HexScene: SKScene {
 
     // Pixel -> axial (fractional)
     private func pixelToAxial(_ p: CGPoint) -> (q: CGFloat, r: CGFloat) {
+
+        // This is called when the screen is touched.  Its called from touchesBegan()
+
+        Log.info("-- pixelToAxial()--")
+
         if pointyTop {
             // Inverse of pointy-top
             // q = (sqrt(3)/3 * x - 1/3 * y) / s
@@ -128,6 +160,11 @@ final class HexScene: SKScene {
 
     // Round fractional axial to nearest hex using cube rounding
     private func axialRound(q: CGFloat, r: CGFloat) -> (Int, Int) {
+        
+        // This is called when the screen is touched.  Its called from pixelsToAxial()
+        Log.info("-- axialRound() --")
+
+        
         var x = q
         var z = r
         var y = -x - z

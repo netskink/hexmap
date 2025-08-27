@@ -13,4 +13,14 @@
    <FileRef
       location = "group:apps/AppOne/AppOne/AppOne.xcodeproj">
    </FileRef>
+   <Group
+      location = "group:docs"
+      name = "docs">
+      <FileRef
+         location = "group:hexmap.md">
+      </FileRef>
+      <FileRef
+         location = "group:urls.md">
+      </FileRef>
+   </Group>
 </Workspace>
