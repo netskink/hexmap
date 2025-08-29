@@ -2,6 +2,12 @@
 <Workspace
    version = "1.0">
    <FileRef
+      location = "group:apps/assets/assets/assets.xcodeproj">
+   </FileRef>
+   <FileRef
+      location = "group:apps/hexmaptileset/hextileset/hextileset.xcodeproj">
+   </FileRef>
+   <FileRef
       location = "group:shared/MySharedLib">
    </FileRef>
    <FileRef
@@ -21,6 +27,19 @@
       </FileRef>
       <FileRef
          location = "group:urls.md">
+      </FileRef>
+   </Group>
+   <Group
+      location = "group:art"
+      name = "art">
+      <FileRef
+         location = "group:dirt.png">
+      </FileRef>
+      <FileRef
+         location = "group:grass.png">
+      </FileRef>
+      <FileRef
+         location = "group:water.png">
       </FileRef>
    </Group>
 </Workspace>
