@@ -92,17 +92,41 @@ final class HexAssetScene: SKScene {
         // fallback is either the subset (identified by palette) or complete available set of tileGroups.
         let fallback = palette.isEmpty ? tileSet.tileGroups : palette
 
+// set tiles programtically
+//        for r in 0..<rows {
+//            for c in 0..<cols {
+//                // every 3 columns or 2 rows, switch tile groups
+//                // the pick ranges from 1 to 1 or 0 to count of items in fallback.
+//                // This is a mod operator.
+//                // pick looks like this: 000111222000111222
+//                let pick = (c / 3 + r / 2) % max(1, fallback.count)
+//                print("\(pick)")
+//                map.setTileGroup(fallback[pick], forColumn: c, row: r)
+//            }
+//        }
         
-        for r in 0..<rows {
-            for c in 0..<cols {
-                // every 3 columns or 2 rows, switch tile groups
-                // the pick ranges from 1 to 1 or 0 to count of items in fallback.
-                // This is a mod operator.
-                // pick looks like this: 000111222000111222
-                let pick = (c / 3 + r / 2) % max(1, fallback.count)
-                print("\(pick)")
-                map.setTileGroup(fallback[pick], forColumn: c, row: r)
+        
+        // Set tiles explictly
+        // 0,0 = lower left
+        // pallete 0 is dirt
+        // pallette 1 is grass
+        // pallette 2 is water
+        // water at top
+        for c in 0...2 {
+            map.setTileGroup(fallback[2], forColumn: c, row: 7)
+        }
+        // dirt next
+        for r in 5...6 {
+            for c in 0...2 {
+                map.setTileGroup(fallback[0], forColumn: c, row: r)
             }
         }
+        // grass next
+        for r in 0...4 {
+            for c in 0...2 {
+                map.setTileGroup(fallback[1], forColumn: c, row: r)
+            }
+        }
+
     }
 }
