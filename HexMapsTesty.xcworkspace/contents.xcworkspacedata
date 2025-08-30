@@ -2,6 +2,9 @@
 <Workspace
    version = "1.0">
    <FileRef
+      location = "group:apps/SceneEditor/SceneEditor.xcodeproj">
+   </FileRef>
+   <FileRef
       location = "group:apps/assets/assets/assets.xcodeproj">
    </FileRef>
    <FileRef
@@ -33,13 +36,55 @@
       location = "group:art"
       name = "art">
       <FileRef
-         location = "group:dirt.png">
+         location = "group:Desert_Hex.png">
       </FileRef>
       <FileRef
-         location = "group:grass.png">
+         location = "group:Grassland_Hex.png">
       </FileRef>
       <FileRef
-         location = "group:water.png">
+         location = "group:mdirt1.png">
+      </FileRef>
+      <FileRef
+         location = "group:mdirt2.png">
+      </FileRef>
+      <FileRef
+         location = "group:mdirt3.png">
+      </FileRef>
+      <FileRef
+         location = "group:mdirt4.png">
+      </FileRef>
+      <FileRef
+         location = "group:mgrass1.png">
+      </FileRef>
+      <FileRef
+         location = "group:mgrass2.png">
+      </FileRef>
+      <FileRef
+         location = "group:mgrass3.png">
+      </FileRef>
+      <FileRef
+         location = "group:mgrass4.png">
+      </FileRef>
+      <FileRef
+         location = "group:mgrass5.png">
+      </FileRef>
+      <FileRef
+         location = "group:mwater1.png">
+      </FileRef>
+      <FileRef
+         location = "group:mwater2.png">
+      </FileRef>
+      <FileRef
+         location = "group:mwater3.png">
+      </FileRef>
+      <FileRef
+         location = "group:mwater4.png">
+      </FileRef>
+      <FileRef
+         location = "group:mwater5.png">
+      </FileRef>
+      <FileRef
+         location = "group:Water_Hex.png">
       </FileRef>
    </Group>
 </Workspace>
