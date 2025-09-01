@@ -42,6 +42,18 @@
          location = "group:Grassland_Hex.png">
       </FileRef>
       <FileRef
+         location = "group:bluerect.png">
+      </FileRef>
+      <FileRef
+         location = "group:redbe.png">
+      </FileRef>
+      <FileRef
+         location = "group:redrect.png">
+      </FileRef>
+      <FileRef
+         location = "group:whitebe.png">
+      </FileRef>
+      <FileRef
          location = "group:mdirt1.png">
       </FileRef>
       <FileRef
