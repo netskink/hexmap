@@ -2,6 +2,9 @@
 <Workspace
    version = "1.0">
    <FileRef
+      location = "group:apps/SceneEditor2/SceneEditor2.xcodeproj">
+   </FileRef>
+   <FileRef
       location = "group:apps/SceneEditor/SceneEditor.xcodeproj">
    </FileRef>
    <FileRef

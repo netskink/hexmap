@@ -6,8 +6,10 @@
 	<dict>
 		<key>SceneEditor.xcscheme_^#shared#^_</key>
 		<dict>
+			<key>isShown</key>
+			<true/>
 			<key>orderHint</key>
-			<integer>7</integer>
+			<integer>0</integer>
 		</dict>
 	</dict>
 </dict>
