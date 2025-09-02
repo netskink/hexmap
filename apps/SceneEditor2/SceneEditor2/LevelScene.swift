@@ -2,7 +2,8 @@
 import SpriteKit
 
 
-let qParity: QParity = .evenQ   // or .oddQ — pick the one that matches your map
+//let qParity: QParity = .evenQ   // or .oddQ — pick the one that matches your map
+let qParity: QParity = .oddQ   // or .oddQ — pick the one that matches your map
 
 final class LevelScene: SKScene {
     
@@ -88,8 +89,11 @@ final class LevelScene: SKScene {
         self.unit = unit
 
 
-        markerLayer.zPosition = baseMap.zPosition + 1.5
-        addChild(markerLayer)
+        
+        // In didMove(to:)
+        markerLayer.removeFromParent()
+        baseMap.addChild(markerLayer)        // <— attach to baseMap
+        markerLayer.zPosition = 1            // above tiles but below units (adjust as needed)
     }
     
     
@@ -101,12 +105,13 @@ final class LevelScene: SKScene {
     }
     
     func placeUnit(named imageName: String, atColumn c: Int, row r: Int) {
+        
         let p = baseMap.centerOfTile(atColumn: c, row: r)
-        let unit = SKSpriteNode(imageNamed: imageName)
-        unit.position = p
-        unit.zPosition = baseMap.zPosition + 2
-        unit.name = "unit:\(imageName):\(c),\(r)"   // <— stable prefix
-        addChild(unit)
+        let m = SKSpriteNode(imageNamed: moveMarkerImageName)
+        m.position = p                       // now correct because parent == baseMap
+        markerLayer.addChild(m)
+        
+        
     }
 
     // MARK: - Movement / Highlights
