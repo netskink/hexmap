@@ -13,7 +13,9 @@ final class LevelScene: SKScene {
     private weak var overlayMap: SKTileMapNode!
     private var unit: SKSpriteNode!
     private var highlightGroup: SKTileGroup!
-    
+    private let markerLayer = SKNode()
+    private let moveMarkerImageName = "aMoveMarker" // <-- add an Image Set with this name
+
     // movement range in tiles
     private let moveRange = 1
     
@@ -82,8 +84,29 @@ final class LevelScene: SKScene {
         let startR = max(0, baseMap.numberOfRows/2)
         unit.position = baseMap.centerOfTile(atColumn: startC, row: startR)
         unit.zPosition = overlayMap.zPosition + 50
-        baseMap.addChild(unit)                                  // attach to map so it moves with it
+        baseMap.addChild(unit)   // attach to map so it moves with it
         self.unit = unit
+
+
+        markerLayer.zPosition = baseMap.zPosition + 1.5
+        addChild(markerLayer)
+    }
+    
+    
+    
+
+
+    private func clearMarkers() {
+        markerLayer.removeAllChildren()
+    }
+    
+    func placeUnit(named imageName: String, atColumn c: Int, row r: Int) {
+        let p = baseMap.centerOfTile(atColumn: c, row: r)
+        let unit = SKSpriteNode(imageNamed: imageName)
+        unit.position = p
+        unit.zPosition = baseMap.zPosition + 2
+        unit.name = "unit:\(imageName):\(c),\(r)"   // <— stable prefix
+        addChild(unit)
     }
 
     // MARK: - Movement / Highlights
@@ -103,8 +126,6 @@ final class LevelScene: SKScene {
         }
     }
    
-    
-    // File-scope helper (no extensions needed)
     private func findAncestorNamedPrefix(_ node: SKNode?, prefix: String) -> SKNode? {
         var n = node
         while let cur = n {
@@ -116,63 +137,52 @@ final class LevelScene: SKScene {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let t = touches.first else { return }
-
         let locInScene = t.location(in: self)
 
-        // 1) Prefer unit-tap if a unit (or any of its children) was hit
-        if let hit = findAncestorNamedPrefix(atPoint(locInScene), prefix: "aUnit"),
-           let parent = hit.parent {
-            // Convert the unit's position (in its parent space) into baseMap space
-            let pInBase = baseMap.convert(hit.position, from: parent)
+        // Prefer a unit if tapped
+        if let unitNode = findAncestorNamedPrefix(atPoint(locInScene), prefix: "unit:"),
+           let parent = unitNode.parent {
+            let pInBase = baseMap.convert(unitNode.position, from: parent)
             let c = baseMap.tileColumnIndex(fromPosition: pInBase)
             let r = baseMap.tileRowIndex(fromPosition: pInBase)
-            if (0..<baseMap.numberOfColumns).contains(c),
-               (0..<baseMap.numberOfRows).contains(r) {
-                showMoveHighlights(fromColumn: c, row: r)
-                return
-            }
-        }
-
-        // 2) Otherwise, compute from the tapped tile
-        let pInBase = baseMap.convert(locInScene, from: self)
-        let c = baseMap.tileColumnIndex(fromPosition: pInBase)
-        let r = baseMap.tileRowIndex(fromPosition: pInBase)
-        if (0..<baseMap.numberOfColumns).contains(c),
-           (0..<baseMap.numberOfRows).contains(r) {
+            guard (0..<baseMap.numberOfColumns).contains(c),
+                  (0..<baseMap.numberOfRows).contains(r) else { return }
             showMoveHighlights(fromColumn: c, row: r)
-        }
-    }
-    
-    
-    // Compute and paint move range
-    // MARK: - EditorScene overlay API
-    func showMoveHighlights(from axial: Axial) {
-        print("showMoveHighlights")
-        guard let marker = baseMap.tileSet.tileGroups.first(where: {
-            $0.name == "aMoveMarker" })
-        else {
             return
         }
 
-        // Clear overlay (fast clear: iterate rows/cols; for big maps you may want to track dirty cells)
-        for c in 0..<overlayMap.numberOfColumns {
-            for r in 0..<overlayMap.numberOfRows {
-                overlayMap.setTileGroup(nil, forColumn: c, row: r)
-            }
-        }
-
-        // Compute axial neighbors and paint
-        for nb in neighbors(of: axial) {
-            let (c, r) = axialToOffset(nb, parity: qParity)
-            guard (0..<overlayMap.numberOfColumns).contains(c),
-                  (0..<overlayMap.numberOfRows).contains(r) else { continue }
-            overlayMap.setTileGroup(marker, forColumn: c, row: r)
-        }
+        // Otherwise, use the touched tile
+        let pInBase = baseMap.convert(locInScene, from: self)
+        let c = baseMap.tileColumnIndex(fromPosition: pInBase)
+        let r = baseMap.tileRowIndex(fromPosition: pInBase)
+        guard (0..<baseMap.numberOfColumns).contains(c),
+              (0..<baseMap.numberOfRows).contains(r) else { return }
+        showMoveHighlights(fromColumn: c, row: r)
     }
-
-    // Back-compat overload if older code passes col/row:
+    
+    // Compute and paint move range
+    // MARK: - EditorScene overlay API
     func showMoveHighlights(fromColumn col: Int, row: Int) {
-        let a = offsetToAxial(col: col, row: row, parity: qParity)
-        showMoveHighlights(from: a)
+        clearMarkers()
+
+        // Convert to axial if your neighbor logic expects axial
+        let centerAxial = offsetToAxial(col: col, row: row, parity: qParity)
+        let nbs = neighbors(of: centerAxial)
+
+        for nb in nbs {
+            let (c, r) = axialToOffset(nb, parity: qParity)
+            guard (0..<baseMap.numberOfColumns).contains(c),
+                  (0..<baseMap.numberOfRows).contains(r) else { continue }
+
+            let p = baseMap.centerOfTile(atColumn: c, row: r)
+            let m = SKSpriteNode(imageNamed: moveMarkerImageName)
+            m.name = "marker:\(c),\(r)"
+            m.position = p
+            m.zPosition = markerLayer.zPosition
+            markerLayer.addChild(m)
+        }
     }
+    
+    
+    
 }
