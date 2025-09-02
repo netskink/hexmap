@@ -104,76 +104,75 @@ final class LevelScene: SKScene {
     }
    
     
+    // File-scope helper (no extensions needed)
+    private func findAncestorNamedPrefix(_ node: SKNode?, prefix: String) -> SKNode? {
+        var n = node
+        while let cur = n {
+            if cur.name?.hasPrefix(prefix) == true { return cur }
+            n = cur.parent
+        }
+        return nil
+    }
+
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let t = touches.first else { return }
-        let p = t.location(in: baseMap)
 
-        let col = baseMap.tileColumnIndex(fromPosition: p)
-        let row = baseMap.tileRowIndex(fromPosition: p)
-        guard (0..<baseMap.numberOfColumns).contains(col),
-              (0..<baseMap.numberOfRows).contains(row) else { return }
+        let locInScene = t.location(in: self)
 
-        // Picked tile in axial space
-        let center = offsetToAxial(col: col, row: row, parity: qParity)
+        // 1) Prefer unit-tap if a unit (or any of its children) was hit
+        if let hit = findAncestorNamedPrefix(atPoint(locInScene), prefix: "aUnit"),
+           let parent = hit.parent {
+            // Convert the unit's position (in its parent space) into baseMap space
+            let pInBase = baseMap.convert(hit.position, from: parent)
+            let c = baseMap.tileColumnIndex(fromPosition: pInBase)
+            let r = baseMap.tileRowIndex(fromPosition: pInBase)
+            if (0..<baseMap.numberOfColumns).contains(c),
+               (0..<baseMap.numberOfRows).contains(r) {
+                showMoveHighlights(fromColumn: c, row: r)
+                return
+            }
+        }
 
-        // SHOW: exactly the 6 nearest neighbors (distance = 1)
-        let nbs = neighbors(of: center)
+        // 2) Otherwise, compute from the tapped tile
+        let pInBase = baseMap.convert(locInScene, from: self)
+        let c = baseMap.tileColumnIndex(fromPosition: pInBase)
+        let r = baseMap.tileRowIndex(fromPosition: pInBase)
+        if (0..<baseMap.numberOfColumns).contains(c),
+           (0..<baseMap.numberOfRows).contains(r) {
+            showMoveHighlights(fromColumn: c, row: r)
+        }
+    }
+    
+    
+    // Compute and paint move range
+    // MARK: - EditorScene overlay API
+    func showMoveHighlights(from axial: Axial) {
+        print("showMoveHighlights")
+        guard let marker = baseMap.tileSet.tileGroups.first(where: {
+            $0.name == "aMoveMarker" })
+        else {
+            return
+        }
 
-        // Optional self-check: assert all are true distance-1 neighbors
-        for nb in nbs { assert(hexDistance(center, nb) == 1, "Bad neighbor: \(nb)") }
-
-        // Paint overlay markers
-        guard let marker = baseMap.tileSet.tileGroups.first(where: { $0.name == "MoveMarker" }) else { return }
-        // Clear old overlay first if desired
+        // Clear overlay (fast clear: iterate rows/cols; for big maps you may want to track dirty cells)
         for c in 0..<overlayMap.numberOfColumns {
             for r in 0..<overlayMap.numberOfRows {
                 overlayMap.setTileGroup(nil, forColumn: c, row: r)
             }
         }
-        for nb in nbs {
-            let (c,r) = axialToOffset(nb, parity: qParity)
+
+        // Compute axial neighbors and paint
+        for nb in neighbors(of: axial) {
+            let (c, r) = axialToOffset(nb, parity: qParity)
             guard (0..<overlayMap.numberOfColumns).contains(c),
                   (0..<overlayMap.numberOfRows).contains(r) else { continue }
             overlayMap.setTileGroup(marker, forColumn: c, row: r)
         }
     }
-    
 
-
-    // Compute and paint move range
-    private func showMoveHighlights(from posInMap: CGPoint) {
-        clearHighlights()
-
-         let startC = baseMap.tileColumnIndex(fromPosition: posInMap)
-         let startR = baseMap.tileRowIndex(fromPosition: posInMap)
-         guard inBounds(startC, startR) else { return }
-
-         // Hex neighbors: pointy-top, "even-q vertical" offset coordinates
-         func hexNeighbors(_ c: Int, _ r: Int) -> [(Int,Int)] {
-             if c % 2 == 0 {
-                 return [(c+1,r), (c-1,r), (c,r+1), (c,r-1), (c+1,r-1), (c-1,r-1)]
-             } else {
-                 return [(c+1,r), (c-1,r), (c,r+1), (c,r-1), (c+1,r+1), (c-1,r+1)]
-             }
-         }
-
-         // BFS search
-         var seen = Set<[Int]>()
-         var q: [(c:Int,r:Int,d:Int)] = [(startC, startR, 0)]
-         seen.insert([startC, startR])
-
-         while !q.isEmpty {
-             let cur = q.removeFirst()
-             if cur.d > 0 {
-                 overlayMap.setTileGroup(highlightGroup, forColumn: cur.c, row: cur.r)
-             }
-             if cur.d == moveRange { continue }
-             for (nc, nr) in hexNeighbors(cur.c, cur.r) where inBounds(nc, nr) && !seen.contains([nc, nr]) {
-                 seen.insert([nc, nr])
-                 q.append((nc, nr, cur.d + 1))
-             }
-         }
+    // Back-compat overload if older code passes col/row:
+    func showMoveHighlights(fromColumn col: Int, row: Int) {
+        let a = offsetToAxial(col: col, row: row, parity: qParity)
+        showMoveHighlights(from: a)
     }
-
-    
 }
