@@ -1,19 +1,12 @@
 import SpriteKit
 
-
-//let qParity: QParity = .evenQ   // or .oddQ — pick the one that matches your map
-let qParity: QParity = .oddQ   // or .oddQ — pick the one that matches your map
-
 final class LevelScene: SKScene {
-
 
     // Strong refs; the scene owns these nodes.
     private var map: SKTileMapNode!
     private var unit: SKSpriteNode!
     private var highlightMap: SKTileMapNode!
     private var highlightGroup: SKTileGroup!
-
-  
 #if DEBUG
 private var debugMode = true
 private var debugDots: [SKNode] = []
@@ -33,9 +26,8 @@ private var debugDots: [SKNode] = []
 
     // MARK: - Scene lifecycle
 
-
     override func didMove(to view: SKView) {
-        guard overlayMap == nil else { return }
+        guard highlightMap == nil else { return }
         backgroundColor = .black
 
         // A) Grab your existing terrain map (by name or first SKTileMapNode)
@@ -192,19 +184,11 @@ private var debugDots: [SKNode] = []
         showMoveHighlights(from: unit.position)  // use the unit’s actual center
     }
 
-    // MARK: - Movement / Highlights
-    private func inBounds(_ c: Int, _ r: Int) -> Bool {
-        var result: Bool
-        result = c >= 0 && c < baseMap.numberOfColumns && r >= 0 && r < baseMap.numberOfRows
-        print(result)
-        return result
-    }
-
-
     private func clearHighlights() {
-        for r in 0..<overlayMap.numberOfRows {
-            for c in 0..<overlayMap.numberOfColumns {
-            overlayMap.setTileGroup(nil, forColumn: c, row: r)
+        guard highlightMap != nil else { return }
+        for r in 0..<highlightMap.numberOfRows {
+            for c in 0..<highlightMap.numberOfColumns {
+                highlightMap.setTileGroup(nil, forColumn: c, row: r)
             }
         }
     }
