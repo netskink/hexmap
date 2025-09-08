@@ -11,16 +11,12 @@ final class LevelScene: SKScene {
     
     #if DEBUG
     // Debug state: when enabled, draw visual dots/labels for neighbor checks
-    private var debugMode = true
+    private var debugMode = false
     private var debugDots: [SKNode] = []    // Track dots so we can clear them
     #endif
 
     // Movement range in tiles (currently single-step movement)
     private let moveRange = 1
-
-    // Choose neighbor model: rectangular grid or hex map
-    private enum NeighborMode { case grid, hex }
-    private let neighborMode: NeighborMode = .hex   // using pointy-top hex tiles
 
     // === Geometry-derived hex neighbor offsets ===
     // Once computed, these are the six (dc,dr) you should use for neighbors.
@@ -228,23 +224,13 @@ final class LevelScene: SKScene {
             if let deltas = hexDeltas { print("Using hex deltas:", deltas) }
         #endif
 
-        switch neighborMode {
-        case .grid:
-            func gridNeighbors(_ c: Int, _ r: Int) -> [(Int, Int)] {
-                [(c + 1, r), (c - 1, r), (c, r + 1), (c, r - 1)]
-            }
-            paintReachable(
-                fromC: startC, fromR: startR, range: moveRange,
-                neighbors: gridNeighbors)
-
-        case .hex:
-            func hexNeighborsMeasured(_ c: Int, _ r: Int) -> [(Int, Int)] {
-                return nearestSixNeighbors(from: c, r0: r)
-            }
-            paintReachable(
-                fromC: startC, fromR: startR, range: moveRange,
-                neighbors: hexNeighborsMeasured)
+        func hexNeighborsMeasured(_ c: Int, _ r: Int) -> [(Int, Int)] {
+            return nearestSixNeighbors(from: c, r0: r)
         }
+        paintReachable(fromC: startC,
+                  fromR: startR,
+                  range: moveRange,
+                  neighbors: hexNeighborsMeasured)
     }
 
     
