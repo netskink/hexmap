@@ -59,25 +59,19 @@ final class LevelScene: SKScene {
         map.anchorPoint = CGPoint(x: 0.5, y: 0.5)
         map.position = CGPoint(x: size.width / 2, y: size.height / 2)
 
-        // Ensure camera exists
-        let cam: SKCameraNode =
-            self.camera
-            ?? {
-                let c = SKCameraNode()
-                addChild(c)
-                self.camera = c
-                return c
-            }()
 
         // Center camera on map and zoom to fit
-        let mapBounds = map.calculateAccumulatedFrame()
-        cam.position = CGPoint(x: mapBounds.midX, y: mapBounds.midY)
+        //let mapBounds = map.calculateAccumulatedFrame()
+        //cam.position = CGPoint(x: mapBounds.midX, y: mapBounds.midY)
 
         // Correct fit math: smaller scale shows more world
-        let wRatio = mapBounds.width / size.width
-        let hRatio = mapBounds.height / size.height
-        let fitScale = 1.0 / max(wRatio, hRatio) * 0.95  // 5% padding inside the edges
-        cam.setScale(max(fitScale, 1e-3))  // avoid divide by zero
+        //let wRatio = mapBounds.width / size.width
+        //let hRatio = mapBounds.height / size.height
+        //let fitScale = 1.0 / max(wRatio, hRatio) * 0.95  // 5% padding inside the edges
+        //cam.setScale(max(fitScale, 1e-3))  // avoid divide by zero
+        
+        fitCamera(to: map, in: view, padding: 16)  // <- nice comfy padding
+        clampCameraToMap()
 
         // B) Build the highlight marker tileset from asset "aMoveMarker"
         let markerTex = SKTexture(imageNamed: "aMoveMarker")
@@ -134,26 +128,34 @@ final class LevelScene: SKScene {
         // E) Derive the six neighbor deltas from geometry (once).
         // E) Compute the six (dc,dr) hex neighbor offsets once from geometry
         deriveHexDeltas()
+        
+    #if DEBUG
+        detectOffsetModel()
+        probe(startC, startR)
+    #endif
+
     }
 
+
+    
     // Re-fit camera if the scene size changes (rotation, split view, etc.)
     // Handle scene size changes (rotation, split view, etc.)
     override func didChangeSize(_ oldSize: CGSize) {
-        guard let cam = camera, let map = self.map else { return }
-
-        // Keep map centered in the scene
-        map.position = CGPoint(x: size.width / 2, y: size.height / 2)
-
-        // Recompute bounds and fit scale
-        let mapBounds = map.calculateAccumulatedFrame()
-        cam.position = CGPoint(x: mapBounds.midX, y: mapBounds.midY)
-
-        let wRatio = mapBounds.width / size.width
-        let hRatio = mapBounds.height / size.height
-        let fitScale = 1.0 / max(wRatio, hRatio) * 0.95
-        cam.setScale(max(fitScale, 1e-3))
+        guard let view = self.view, map != nil else { return }
+        // Re-center the map (since the scene size changed)
+        map.position = CGPoint(x: size.width/2, y: size.height/2)
+        fitCamera(to: map, in: view, padding: 16)
     }
 
+    private func clampCameraToMap() {
+        guard let cam = camera else { return }
+        let r = map.calculateAccumulatedFrame()
+        cam.constraints = [
+            SKConstraint.positionX(SKRange(lowerLimit: r.minX, upperLimit: r.maxX)),
+            SKConstraint.positionY(SKRange(lowerLimit: r.minY, upperLimit: r.maxY))
+        ]
+    }
+    
     // MARK: - Input
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -218,6 +220,44 @@ final class LevelScene: SKScene {
             }
         }
     }
+
+    /// Zoom the camera so `target` (your map) fits inside the visible screen,
+    /// respecting safe areas and adding a little padding.
+    /// Zoom the camera so `target` fits inside the screen's *usable* area.
+    /// Works on rotation by deferring one runloop so safeAreaInsets are final.
+    private func fitCamera(to target: SKNode, in view: SKView, padding: CGFloat = 16) {
+        // Ensure a camera exists
+        if camera == nil {
+            let cam = SKCameraNode()
+            addChild(cam)
+            self.camera = cam
+        }
+
+        // 1) Center the thing we want to show (important before measuring)
+        let targetFrame = target.calculateAccumulatedFrame()
+        camera?.position = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
+
+        // 2) Compute the scale using *current* safe area (may still be stale)
+        func computeScale(using insets: UIEdgeInsets) -> CGFloat {
+            // Scene is .resizeFill so scene.size matches view.bounds (in points)
+            let usableW = max(view.bounds.width  - (insets.left + insets.right)  - padding * 2, 1)
+            let usableH = max(view.bounds.height - (insets.top  + insets.bottom) - padding * 2, 1)
+            let scaleX = targetFrame.width  / usableW
+            let scaleY = targetFrame.height / usableH
+            return max(scaleX, scaleY)
+        }
+
+        // 3) Do an immediate guess (good enough for most cases)…
+        let immediateScale = computeScale(using: view.safeAreaInsets)
+        camera?.setScale(max(immediateScale, 1e-3))
+
+        // 4) …then fix it on the next runloop tick when insets settle after rotation
+        DispatchQueue.main.async { [weak self, weak view] in
+            guard let self, let view else { return }
+            let settledScale = computeScale(using: view.safeAreaInsets)
+            self.camera?.setScale(max(settledScale, 1e-3))
+        }
+    }
     
     // === Highlight neighbors and reachable tiles ===
     private func showMoveHighlights(from unitPosInMap: CGPoint) {
@@ -237,13 +277,23 @@ final class LevelScene: SKScene {
             if let deltas = hexDeltas { print("Using hex deltas:", deltas) }
         #endif
 
+        //func hexNeighborsMeasured(_ c: Int, _ r: Int) -> [(Int, Int)] {
+        //    return nearestSixNeighbors(from: c, r0: r)
+        //}
+        // replace the geometry-based neighbors with the deterministic even-r neighbors:
+        //func hexNeighborsMeasured(_ c: Int, _ r: Int) -> [(Int, Int)] {
+        //    return evenRNeighbors(c, r)  // <- use this if you want exact even-r logic
+        //}
         func hexNeighborsMeasured(_ c: Int, _ r: Int) -> [(Int, Int)] {
-            return nearestSixNeighbors(from: c, r0: r)
+            return oddRNeighborsBL(c, r)   // <- odd-R per detector
         }
+        
         paintReachable(fromC: startC,
                   fromR: startR,
                   range: moveRange,
                   neighbors: hexNeighborsMeasured)
+
+        
     }
 
     
@@ -355,6 +405,81 @@ final class LevelScene: SKScene {
         return out
     }
 
+        
+    
+    /// Even-R neighbors (pointy-top, row-offset) with bottom-left origin
+    private func evenRNeighbors(_ c: Int, _ r: Int) -> [(Int, Int)] {
+        if r % 2 == 0 {
+            // even row shifted right
+            return [
+                (c+1, r),   // E
+                (c,   r+1), // NE
+                (c-1, r+1), // NW
+                (c-1, r),   // W
+                (c-1, r-1), // SW
+                (c,   r-1)  // SE
+            ]
+        } else {
+            // odd row not shifted
+            return [
+                (c+1, r),   // E
+                (c+1, r+1), // NE
+                (c,   r+1), // NW
+                (c-1, r),   // W
+                (c,   r-1), // SW
+                (c+1, r-1)  // SE
+            ]
+        }
+    }
+    
+    
+    /// Pointy-top, row-offset (R), bottom-left origin.
+    /// Use this when **odd rows are shifted right** (odd-R).
+    private func oddRNeighborsBL(_ c: Int, _ r: Int) -> [(Int, Int)] {
+        if r % 2 == 1 {  // odd row shifted right
+            return [
+                (c+1, r),   // E
+                (c+1, r+1), // NE
+                (c,   r+1), // NW
+                (c-1, r),   // W
+                (c,   r-1), // SW
+                (c+1, r-1)  // SE
+            ]
+        } else {         // even row not shifted
+            return [
+                (c+1, r),   // E
+                (c,   r+1), // NE
+                (c-1, r+1), // NW
+                (c-1, r),   // W
+                (c-1, r-1), // SW
+                (c,   r-1)  // SE
+            ]
+        }
+    }
+
+    /// If you ever have **even rows shifted right** (even-R), use this one instead.
+    private func evenRNeighborsBL(_ c: Int, _ r: Int) -> [(Int, Int)] {
+        if r % 2 == 0 {  // even row shifted right
+            return [
+                (c+1, r),   // E
+                (c,   r+1), // NE
+                (c-1, r+1), // NW
+                (c-1, r),   // W
+                (c-1, r-1), // SW
+                (c,   r-1)  // SE
+            ]
+        } else {         // odd row not shifted
+            return [
+                (c+1, r),   // E
+                (c+1, r+1), // NE
+                (c,   r+1), // NW
+                (c-1, r),   // W
+                (c,   r-1), // SW
+                (c+1, r-1)  // SE
+            ]
+        }
+    }
+    
     // === Calibration of hex deltas (optional) ===
     // Uses a center tile, scans neighbors, and buckets by angle
     // to derive a consistent set of (dc,dr) offsets.
@@ -564,5 +689,94 @@ final class LevelScene: SKScene {
             }
         }
     }
+    
+    
+    
+
+    /// Call once after `self.map` is set (e.g. at end of didMove).
+    private func detectOffsetModel() {
+        // Pick an interior tile (avoid edges so neighbors exist)
+        let c0 = max(1, min(map.numberOfColumns - 2, 2))
+        let r0 = max(1, min(map.numberOfRows    - 2, 2))
+
+        let p00 = map.centerOfTile(atColumn: c0,     row: r0)
+        let pRow = map.centerOfTile(atColumn: c0,     row: r0 + 1) // same col, next row
+        let pCol = map.centerOfTile(atColumn: c0 + 1, row: r0)     // next col, same row
+
+        // How a +row or +col step moves in screen space
+        let dRow = CGVector(dx: pRow.x - p00.x, dy: pRow.y - p00.y)
+        let dCol = CGVector(dx: pCol.x - p00.x, dy: pCol.y - p00.y)
+
+        let axRow = abs(dRow.dx), ayRow = abs(dRow.dy)
+        let axCol = abs(dCol.dx), ayCol = abs(dCol.dy)
+
+        print("DETECT raw: dRow(dx:\(Int(dRow.dx)), dy:\(Int(dRow.dy)))  dCol(dx:\(Int(dCol.dx)), dy:\(Int(dCol.dy)))")
+
+        // Helper
+        @inline(__always) func ratio(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a / max(b, 0.0001) }
+        let rowYvsX = ratio(ayRow, axRow)   // how vertical a row step is
+        let colXvsY = ratio(axCol, ayCol)   // how horizontal a col step is
+
+        // Log nice rounded values
+        let r1 = Double((rowYvsX * 100).rounded() / 100)
+        let r2 = Double((colXvsY * 100).rounded() / 100)
+        print("DETECT ratios: rowYvsX=\(r1)  colXvsY=\(r2)")
+
+        // Tunable thresholds
+        let STRONGLY_HORIZONTAL: CGFloat = 1.8   // col step must be very horizontal
+        let MORE_VERTICAL_THAN_HORIZONTAL: CGFloat = 1.1 // row step simply needs to favor vertical
+
+        let colIsStronglyHorizontal = colXvsY >= STRONGLY_HORIZONTAL
+        let rowIsVerticalDominant   = rowYvsX >= MORE_VERTICAL_THAN_HORIZONTAL
+
+        // POINTY-TOP (row-offset “R”): col step strongly horizontal AND
+        // row step more vertical than horizontal
+        if colIsStronglyHorizontal && rowIsVerticalDominant {
+            // Determine parity for row-offset:
+            // which row (even or odd) is shifted to the right at the same column?
+            let re = (r0 % 2 == 0) ? r0 : r0 - 1  // an even row near r0
+            let ro = re + 1                        // the next odd row
+            if re >= 0, ro < map.numberOfRows {
+                let pEven = map.centerOfTile(atColumn: c0, row: re)
+                let pOdd  = map.centerOfTile(atColumn: c0, row: ro)
+                let evenShiftRight = pEven.x > pOdd.x
+                print("DETECT: pointy-top (row-offset, R) — \(evenShiftRight ? "even-R (even rows shifted right)" : "odd-R (odd rows shifted right)")")
+            } else {
+                print("DETECT: pointy-top (row-offset, R) — parity check skipped (edge).")
+            }
+            return
+        }
+
+        // FLAT-TOP (row-offset / r):
+        // col step is strongly horizontal, but row step is NOT vertically dominant.
+        if colIsStronglyHorizontal && !rowIsVerticalDominant {
+            // Determine parity: which row is shifted right?
+            let re = (r0 % 2 == 0) ? r0 : r0 - 1  // even row near r0
+            let ro = re + 1
+            if re >= 0, ro < map.numberOfRows {
+                let pEven = map.centerOfTile(atColumn: c0, row: re)
+                let pOdd  = map.centerOfTile(atColumn: c0, row: ro)
+                let evenShiftRight = pEven.x > pOdd.x
+                print("DETECT: flat-top (row-offset, r) — \(evenShiftRight ? "even-r" : "odd-r")")
+            } else {
+                print("DETECT: flat-top (row-offset, r) — parity check skipped (edge).")
+            }
+            return
+        }
+
+        // Otherwise we can't say confidently.
+        print("DETECT: ambiguous → rowYvsX=\(Double(rowYvsX)) colXvsY=\(Double(colXvsY)) — using geometry-based neighbors.")
+    }
+    
+    private func probe(_ c: Int, _ r: Int) {
+        guard isInBounds(c, r) else { return }
+        let p = map.centerOfTile(atColumn: c, row: r)
+        let a = SKShapeNode(circleOfRadius: 6); a.fillColor = .yellow; a.position = p
+        let b = SKShapeNode(circleOfRadius: 5); b.fillColor = .green;  b.position = map.centerOfTile(atColumn: c+1, row: r)
+        let d = SKShapeNode(circleOfRadius: 5); d.fillColor = .blue;   d.position = map.centerOfTile(atColumn: c,   row: r+1)
+        for n in [a,b,d] { n.zPosition = 9_999; map.addChild(n) }
+        print("probe (c,r)=\(c),\(r)  (c+1,r) green  (c,r+1) blue")
+    }
+
 #endif
 }
