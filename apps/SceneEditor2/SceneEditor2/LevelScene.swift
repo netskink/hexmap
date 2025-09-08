@@ -2,91 +2,107 @@ import SpriteKit
 
 final class LevelScene: SKScene {
 
-    // Strong refs; the scene owns these nodes.
-    private var map: SKTileMapNode!
-    private var unit: SKSpriteNode!
-    private var highlightMap: SKTileMapNode!
-    private var highlightGroup: SKTileGroup!
-#if DEBUG
-private var debugMode = true
-private var debugDots: [SKNode] = []
-#endif
+    // === Core state ===
+    // Strong refs; these nodes live for the life of the scene.
+    private var map: SKTileMapNode!         // The terrain tile map from your .sks
+    private var unit: SKSpriteNode!         // The player's movable unit
+    private var highlightMap: SKTileMapNode!// Overlay map for movement markers
+    private var highlightGroup: SKTileGroup!// TileGroup for "aMoveMarker"
+    
+    #if DEBUG
+    // Debug state: when enabled, draw visual dots/labels for neighbor checks
+    private var debugMode = true
+    private var debugDots: [SKNode] = []    // Track dots so we can clear them
+    #endif
 
-    // Movement range in tiles
+    // Movement range in tiles (currently single-step movement)
     private let moveRange = 1
 
-    // Toggle this to .grid if you want 4-way movement on a rect grid.
+    // Choose neighbor model: rectangular grid or hex map
     private enum NeighborMode { case grid, hex }
-    private let neighborMode: NeighborMode = .hex   // pointy-top hex map
+    private let neighborMode: NeighborMode = .hex   // using pointy-top hex tiles
 
     // === Geometry-derived hex neighbor offsets ===
     // Once computed, these are the six (dc,dr) you should use for neighbors.
     // Order is clockwise starting near +X (east).
+    // Once computed, the 6 offsets (dc,dr) for hex neighbors
+    // These are derived at runtime from geometry rather than hard-coded.
     private var hexDeltas: [(Int, Int)]?
 
     // MARK: - Scene lifecycle
 
     override func didMove(to view: SKView) {
+        // Prevent re-initialization if scene is re-entered
         guard highlightMap == nil else { return }
         backgroundColor = .black
 
-        // A) Grab your existing terrain map (by name or first SKTileMapNode)
-        let terrain = (childNode(withName: "Tile Map Node") as? SKTileMapNode)
+        // A) Get the terrain map from the scene (by name or first tile map found).
+        let terrain =
+            (childNode(withName: "Tile Map Node") as? SKTileMapNode)
             ?? (children.compactMap { $0 as? SKTileMapNode }.first)
 
         guard let map = terrain else {
-            assertionFailure("No SKTileMapNode found. Name it 'Tile Map Node' or add one to the scene.")
+            assertionFailure(
+                "No SKTileMapNode found. Name it 'Tile Map Node' or add one to the scene."
+            )
             return
         }
         self.map = map
 
         // (Optional) DEBUG: render (c,r) labels on every tile to validate indexing.
         #if DEBUG
-        addDebugCRLabels()
+            addDebugCRLabels()
         #endif
 
         // Center map in the scene (safe default)
         map.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-        map.position = CGPoint(x: size.width/2, y: size.height/2)
+        map.position = CGPoint(x: size.width / 2, y: size.height / 2)
 
-        // Ensure camera
-        let cam: SKCameraNode = self.camera ?? {
-            let c = SKCameraNode()
-            addChild(c)
-            self.camera = c
-            return c
-        }()
+        // Ensure camera exists
+        let cam: SKCameraNode =
+            self.camera
+            ?? {
+                let c = SKCameraNode()
+                addChild(c)
+                self.camera = c
+                return c
+            }()
 
         // Center camera on map and zoom to fit
         let mapBounds = map.calculateAccumulatedFrame()
         cam.position = CGPoint(x: mapBounds.midX, y: mapBounds.midY)
 
         // Correct fit math: smaller scale shows more world
-        let wRatio = mapBounds.width  / size.width
+        let wRatio = mapBounds.width / size.width
         let hRatio = mapBounds.height / size.height
         let fitScale = 1.0 / max(wRatio, hRatio) * 0.95  // 5% padding inside the edges
-        cam.setScale(max(fitScale, 1e-3))
+        cam.setScale(max(fitScale, 1e-3))  // avoid divide by zero
 
-        // B) Build a tiny TileSet from your Image Set "aMoveMarker"
+        // B) Build the highlight marker tileset from asset "aMoveMarker"
         let markerTex = SKTexture(imageNamed: "aMoveMarker")
-        markerTex.filteringMode = .nearest   // optional: crisper pixels
+        markerTex.filteringMode = .nearest  // optional: crisper pixels
         let def = SKTileDefinition(texture: markerTex, size: map.tileSize)
         let group = SKTileGroup(tileDefinition: def)
         group.name = "moveHighlight"
         self.highlightGroup = group
 
-        let overlaySet = SKTileSet(tileGroups: [group], tileSetType: .hexagonalPointy)
+        // Wrap that group in a tiny TileSet
+        let overlaySet = SKTileSet(tileGroups: [group],
+                               tileSetType: .hexagonalPointy)
         overlaySet.defaultTileSize = map.tileSize
 
         // C) Create an overlay tile map (same grid) for highlights only
-        let overlay = SKTileMapNode(tileSet: overlaySet,
-                                    columns: map.numberOfColumns,
-                                    rows: map.numberOfRows,
-                                    tileSize: map.tileSize)
+        // C) Create overlay tile map for highlights (same size as terrain)
+        let overlay = SKTileMapNode(
+            tileSet: overlaySet,
+            columns: map.numberOfColumns,
+            rows: map.numberOfRows,
+            tileSize: map.tileSize)
         overlay.enableAutomapping = false
         overlay.zPosition = map.zPosition + 50
 
         // Attach overlay to the map so any future map moves/pans also move highlights.
+        // Attach overlay as a child of the map (keeps it aligned automatically)
         map.addChild(overlay)
         // Keep overlay perfectly aligned with map
         overlay.anchorPoint = map.anchorPoint
@@ -95,8 +111,9 @@ private var debugDots: [SKNode] = []
         self.highlightMap = overlay
 
         // D) Add your unit from Image Set "aBlueUnit"
+        // D) Add the movable unit sprite ("aBlueUnit") at map center
         let unitTex = SKTexture(imageNamed: "aBlueUnit")
-        unitTex.filteringMode = .nearest     // optional: crisper pixels
+        unitTex.filteringMode = .nearest  // optional: crisper pixels
         let u = SKSpriteNode(texture: unitTex)
         let targetH = map.tileSize.height * 0.9
         u.setScale(targetH / unitTex.size().height)
@@ -111,21 +128,23 @@ private var debugDots: [SKNode] = []
         self.unit = u
 
         // E) Derive the six neighbor deltas from geometry (once).
+        // E) Compute the six (dc,dr) hex neighbor offsets once from geometry
         deriveHexDeltas()
     }
 
     // Re-fit camera if the scene size changes (rotation, split view, etc.)
+    // Handle scene size changes (rotation, split view, etc.)
     override func didChangeSize(_ oldSize: CGSize) {
         guard let cam = camera, let map = self.map else { return }
 
         // Keep map centered in the scene
-        map.position = CGPoint(x: size.width/2, y: size.height/2)
+        map.position = CGPoint(x: size.width / 2, y: size.height / 2)
 
         // Recompute bounds and fit scale
         let mapBounds = map.calculateAccumulatedFrame()
         cam.position = CGPoint(x: mapBounds.midX, y: mapBounds.midY)
 
-        let wRatio = mapBounds.width  / size.width
+        let wRatio = mapBounds.width / size.width
         let hRatio = mapBounds.height / size.height
         let fitScale = 1.0 / max(wRatio, hRatio) * 0.95
         cam.setScale(max(fitScale, 1e-3))
@@ -138,52 +157,50 @@ private var debugDots: [SKNode] = []
         let pMap = t.location(in: map)
 
         // Did we tap the unit?
+        // If the unit was tapped → show possible moves
         if let parent = unit.parent, unit.contains(t.location(in: parent)) {
-            showMoveHighlightsFromUnit() // use the unit’s actual center
+            showMoveHighlightsFromUnit()  // use the unit’s actual center
             return
         }
 
+        // Otherwise, if tapped on a highlighted tile → move the unit
         // Tap on a highlighted tile to move the unit there
         let c = map.tileColumnIndex(fromPosition: pMap)
         let r = map.tileRowIndex(fromPosition: pMap)
-        if isInBounds(c, r),
-           highlightMap.tileGroup(atColumn: c, row: r) != nil,
-           map.tileGroup(atColumn: c, row: r)?.name != "watergroup" // block water
+        
+        
+        
+        if isInBounds(c, r),  // first check that indices are inside the map
+           highlightMap.tileGroup(atColumn: c, row: r) != nil,  // check for highlighted
+           map.tileGroup(atColumn: c, row: r)?.name != "watergroup"  // check not in water
         {
+            // touch location is permissable
             let dest = map.centerOfTile(atColumn: c, row: r)
             unit.run(.move(to: dest, duration: 0.2))
         }
         clearHighlights()
     }
-  
-    
-    
 
+    
+    // MARK: - Helpers
     
     #if DEBUG
-    private let touchViz = TouchVisualizer()
+        private let touchViz = TouchVisualizer()
     #endif
-
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches {
-            let p = t.location(in: self)
-            #if DEBUG
-            touchViz.show(at: p, in: self)
-            #endif
-        }
-        super.touchesBegan(touches, with: event)
-    }
 
     // MARK: - Helpers
 
+    // Bounds guard: ensure column/row are valid indices
     private func isInBounds(_ c: Int, _ r: Int) -> Bool {
         c >= 0 && c < map.numberOfColumns && r >= 0 && r < map.numberOfRows
     }
 
+    // Convenience: show highlights starting from current unit position
     private func showMoveHighlightsFromUnit() {
         showMoveHighlights(from: unit.position)  // use the unit’s actual center
     }
 
+    // Clear highlight overlay completely
     private func clearHighlights() {
         guard highlightMap != nil else { return }
         for r in 0..<highlightMap.numberOfRows {
@@ -193,25 +210,113 @@ private var debugDots: [SKNode] = []
         }
     }
     
-    /// Returns the 6 nearest neighbor tile coordinates around (c0,r0)
-    /// by looking at centers and picking the six closest tiles.
-    /// Works regardless of even/odd column or row direction.
-    /// Returns the ~6 nearest neighbor tile coordinates around (c0,r0),
-    /// constrained by a distance band so we don't accidentally include
-    /// far tiles when we're near the edge of the map.
+    // === Highlight neighbors and reachable tiles ===
+    private func showMoveHighlights(from unitPosInMap: CGPoint) {
+        clearHighlights()
+
+        let startC = map.tileColumnIndex(fromPosition: unitPosInMap)
+        let startR = map.tileRowIndex(fromPosition: unitPosInMap)
+        #if DEBUG
+            if debugMode {
+                showDebugNeighbors(from: startC, r0: startR)
+            }
+        #endif
+        guard isInBounds(startC, startR) else { return }
+
+        #if DEBUG
+            print("Start tile (c,r) = (\(startC),\(startR))")
+            if let deltas = hexDeltas { print("Using hex deltas:", deltas) }
+        #endif
+
+        switch neighborMode {
+        case .grid:
+            func gridNeighbors(_ c: Int, _ r: Int) -> [(Int, Int)] {
+                [(c + 1, r), (c - 1, r), (c, r + 1), (c, r - 1)]
+            }
+            paintReachable(
+                fromC: startC, fromR: startR, range: moveRange,
+                neighbors: gridNeighbors)
+
+        case .hex:
+            func hexNeighborsMeasured(_ c: Int, _ r: Int) -> [(Int, Int)] {
+                return nearestSixNeighbors(from: c, r0: r)
+            }
+            paintReachable(
+                fromC: startC, fromR: startR, range: moveRange,
+                neighbors: hexNeighborsMeasured)
+        }
+    }
+
+    
+    // Generic BFS painter
+    // === BFS traversal to find reachable tiles ===
+    private func paintReachable(fromC: Int,
+                        fromR: Int,
+                        range: Int,
+                        neighbors: (Int, Int) -> [(Int, Int)]) {
+        
+        var visited = Set<[Int]>()
+        var queue: [(c: Int, r: Int, d: Int)] = [(fromC, fromR, 0)]
+        visited.insert([fromC, fromR])
+
+        while !queue.isEmpty {
+            let cur = queue.removeFirst()
+
+            // Skip painting the start tile; paint all others within range
+            if cur.d > 0 {
+                highlightMap.setTileGroup(
+                    highlightGroup, forColumn: cur.c, row: cur.r)
+            }
+            if cur.d == range { continue }
+
+            for (nc, nr) in neighbors(cur.c, cur.r) {
+                if isInBounds(nc, nr) && !visited.contains([nc, nr]) {
+
+                    // Terrain check: skip water tiles entirely (no ring, no traversal).
+                    // If you prefer to show blocked tiles, paint here and do not enqueue.
+                    if let name = map.tileGroup(atColumn: nc, row: nr)?.name,
+                        name == "watergroup"
+                    {
+                        continue
+                    }
+
+                    visited.insert([nc, nr])
+                    queue.append((nc, nr, cur.d + 1))
+                }
+            }
+        }
+    }
+
+    
+    // === Geometry-based neighbor finder ===
+    // Collects surrounding tiles and selects the six closest centers
+    // so we always get proper hex neighbors even near edges.
+    // Returns the 6 nearest neighbor tile coordinates around (c0,r0)
+    // by looking at centers and picking the six closest tiles.
+    // Works regardless of even/odd column or row direction.
+    // Returns the ~6 nearest neighbor tile coordinates around (c0,r0),
+    // constrained by a distance band so we don't accidentally include
+    // far tiles when we're near the edge of the map.
     private func nearestSixNeighbors(from c0: Int, r0: Int) -> [(Int, Int)] {
-        struct Cand { let c: Int; let r: Int; let d2: CGFloat }
+        
+        struct Cand {
+            let c: Int
+            let r: Int
+            let d2: CGFloat
+        }
         let p0 = map.centerOfTile(atColumn: c0, row: r0)
 
         var cands: [Cand] = []
         for dr in -2...2 {
             for dc in -2...2 {
                 if dc == 0 && dr == 0 { continue }
-                let c = c0 + dc, r = r0 + dr
+                let c = c0 + dc
+                let r = r0 + dr
                 if !isInBounds(c, r) { continue }
-                let p  = map.centerOfTile(atColumn: c, row: r)
-                let dx = p.x - p0.x, dy = p.y - p0.y
-                let d2 = dx*dx + dy*dy
+                let p = map.centerOfTile(atColumn: c, row: r)
+                let dx = p.x - p0.x
+                let dy = p.y - p0.y
+                let d2 = dx * dx + dy * dy
                 cands.append(Cand(c: c, r: r, d2: d2))
             }
         }
@@ -226,7 +331,7 @@ private var debugDots: [SKNode] = []
         let cutoffTight: CGFloat = base * 1.35  // primary ring
         let cutoffLoose: CGFloat = base * 1.75  // fallback if we got < 6
 
-        var out: [(Int,Int)] = []
+        var out: [(Int, Int)] = []
         var seen = Set<String>()
 
         // 1) Take unique neighbors within the tight band
@@ -250,158 +355,10 @@ private var debugDots: [SKNode] = []
         // Return however many we have (can be < 6 at edges; that's OK).
         return out
     }
-#if DEBUG
-private func clearDebugDots() {
-    for n in debugDots { n.removeFromParent() }
-    debugDots.removeAll()
-}
 
-private func dot(at p: CGPoint, radius: CGFloat = 6, color: SKColor) -> SKShapeNode {
-    let n = SKShapeNode(circleOfRadius: radius)
-    n.position = p
-    n.fillColor = color
-    n.strokeColor = color
-    n.lineWidth = 1
-    n.zPosition = 2000
-    return n
-}
-
-/// Draw numbered dots on the 6 neighbors and print details
-private func showDebugNeighbors(from c0: Int, r0: Int) {
-    guard debugMode else { return }
-    clearDebugDots()
-
-    // Draw a dot at center tile
-    let p0 = map.centerOfTile(atColumn: c0, row: r0)
-    let centerDot = dot(at: p0, radius: 8, color: .yellow)
-    map.addChild(centerDot)
-    debugDots.append(centerDot)
-
-    // Collect & sort candidates by distance so we can see why 6 were chosen
-    struct Cand { let c: Int; let r: Int; let d2: CGFloat }
-    var cands: [Cand] = []
-    for dr in -2...2 {
-        for dc in -2...2 {
-            if dc == 0 && dr == 0 { continue }
-            let c = c0 + dc, r = r0 + dr
-            if !isInBounds(c, r) { continue }
-            let p  = map.centerOfTile(atColumn: c, row: r)
-            let dx = p.x - p0.x, dy = p.y - p0.y
-            let d2 = dx*dx + dy*dy
-            cands.append(Cand(c: c, r: r, d2: d2))
-        }
-    }
-    cands.sort { $0.d2 < $1.d2 }
-
-    // Pick first 6 unique
-    var chosen: [(Int,Int,CGFloat)] = []
-    var seen = Set<String>()
-    for cand in cands {
-        let key = "\(cand.c),\(cand.r)"
-        if seen.contains(key) { continue }
-        seen.insert(key)
-        chosen.append((cand.c, cand.r, cand.d2))
-        if chosen.count == 6 { break }
-    }
-
-    // Print the chosen 6 with distances
-    let list = chosen.map { "(\($0.0),\($0.1)) d2=\(Int($0.2))" }.joined(separator: ", ")
-    print("DEBUG chosen 6 from (\(c0),\(r0)): [\(list)]")
-
-    // Draw dots for the chosen 6 (green) and a small index label
-    for (idx, entry) in chosen.enumerated() {
-        let (c, r, _) = entry
-        let p = map.centerOfTile(atColumn: c, row: r)
-        let d = dot(at: p, radius: 5, color: .green)
-        map.addChild(d)
-        debugDots.append(d)
-
-        let label = SKLabelNode(fontNamed: "Menlo")
-        label.fontSize = 10
-        label.text = "\(idx)"
-        label.fontColor = .white
-        label.verticalAlignmentMode = .center
-        label.horizontalAlignmentMode = .center
-        label.position = CGPoint(x: p.x, y: p.y + 12)
-        label.zPosition = 2001
-        map.addChild(label)
-        debugDots.append(label)
-    }
-}
-#endif
-
-#if DEBUG
-private func printNeighbors(of c: Int, _ r: Int) {
-    let neigh = nearestSixNeighbors(from: c, r0: r)
-    print("Neighbors(\(c),\(r)) -> \(neigh)")
-}
-#endif
-
-    
-    private func showMoveHighlights(from unitPosInMap: CGPoint) {
-        clearHighlights()
-
-        let startC = map.tileColumnIndex(fromPosition: unitPosInMap)
-        let startR = map.tileRowIndex(fromPosition: unitPosInMap)
-#if DEBUG
-if debugMode {
-    showDebugNeighbors(from: startC, r0: startR)
-}
-#endif
-        guard isInBounds(startC, startR) else { return }
-
-        #if DEBUG
-        print("Start tile (c,r) = (\(startC),\(startR))")
-        if let deltas = hexDeltas { print("Using hex deltas:", deltas) }
-        #endif
-
-        switch neighborMode {
-        case .grid:
-            func gridNeighbors(_ c: Int, _ r: Int) -> [(Int,Int)] {
-                [(c+1,r), (c-1,r), (c,r+1), (c,r-1)]
-            }
-            paintReachable(fromC: startC, fromR: startR, range: moveRange, neighbors: gridNeighbors)
-
-        case .hex:
-            func hexNeighborsMeasured(_ c: Int, _ r: Int) -> [(Int,Int)] {
-                return nearestSixNeighbors(from: c, r0: r)
-            }
-            paintReachable(fromC: startC, fromR: startR, range: moveRange, neighbors: hexNeighborsMeasured)        }
-    }
-
-    // Generic BFS painter
-    private func paintReachable(fromC: Int, fromR: Int, range: Int,
-                                neighbors: (Int,Int)->[(Int,Int)]) {
-        var visited = Set<[Int]>()
-        var queue: [(c:Int, r:Int, d:Int)] = [(fromC, fromR, 0)]
-        visited.insert([fromC, fromR])
-
-        while !queue.isEmpty {
-            let cur = queue.removeFirst()
-
-            // Skip painting the start tile; paint all others within range
-            if cur.d > 0 {
-                highlightMap.setTileGroup(highlightGroup, forColumn: cur.c, row: cur.r)
-            }
-            if cur.d == range { continue }
-
-            for (nc, nr) in neighbors(cur.c, cur.r) {
-                if isInBounds(nc, nr) && !visited.contains([nc, nr]) {
-
-                    // Terrain check: skip water tiles entirely (no ring, no traversal).
-                    // If you prefer to show blocked tiles, paint here and do not enqueue.
-                    if let name = map.tileGroup(atColumn: nc, row: nr)?.name,
-                       name == "watergroup" {
-                        continue
-                    }
-
-                    visited.insert([nc, nr])
-                    queue.append((nc, nr, cur.d + 1))
-                }
-            }
-        }
-    }
-
+    // === Calibration of hex deltas (optional) ===
+    // Uses a center tile, scans neighbors, and buckets by angle
+    // to derive a consistent set of (dc,dr) offsets.
     // === Geometry-based neighbor calibration ===
     // We find the six neighboring tiles around a center tile by
     // scanning nearby tiles, bucketing by polar angle into 6 sectors,
@@ -410,7 +367,7 @@ if debugMode {
     private func deriveHexDeltas() {
         // Choose a safe center tile away from edges
         let c0 = max(1, min(map.numberOfColumns - 2, map.numberOfColumns / 2))
-        let r0 = max(1, min(map.numberOfRows    - 2, map.numberOfRows    / 2))
+        let r0 = max(1, min(map.numberOfRows - 2, map.numberOfRows / 2))
         let p0 = map.centerOfTile(atColumn: c0, row: r0)
 
         struct Candidate {
@@ -420,9 +377,12 @@ if debugMode {
             let angle: CGFloat
         }
 
-        var buckets = Array(repeating: Candidate(dc: 0, dr: 0, dist2: .infinity, angle: 0), count: 6)
+        var buckets = Array(
+            repeating: Candidate(dc: 0, dr: 0, dist2: .infinity, angle: 0),
+            count: 6)
 
         // Scan a small neighborhood around (c0,r0)
+        // Scan a 5×5 box around the center
         for dr in -2...2 {
             for dc in -2...2 {
                 if dc == 0 && dr == 0 { continue }
@@ -433,28 +393,33 @@ if debugMode {
                 let p = map.centerOfTile(atColumn: c, row: r)
                 let dx = p.x - p0.x
                 let dy = p.y - p0.y
-                let d2 = dx*dx + dy*dy
+                let d2 = dx * dx + dy * dy
                 // Ignore far tiles; keep those near 1 tile away
                 // Use a generous radius band to accommodate any spacing.
-                let minD2 = pow(min(map.tileSize.width, map.tileSize.height) * 0.5, 0.6)
-                let maxD2 = pow(max(map.tileSize.width, map.tileSize.height) * 0.9, 0.9)
+                let minD2 = pow(
+                    min(map.tileSize.width, map.tileSize.height) * 0.5, 0.6)
+                let maxD2 = pow(
+                    max(map.tileSize.width, map.tileSize.height) * 0.9, 0.9)
                 if d2 < minD2 || d2 > maxD2 { continue }
 
-                var ang = atan2(dy, dx) // radians, -π..π, 0 along +X (east)
-                if ang < 0 { ang += 2 * .pi } // 0..2π
+                var ang = atan2(dy, dx)  // radians, -π..π, 0 along +X (east)
+                if ang < 0 { ang += 2 * .pi }  // 0..2π
 
                 // 6 sectors centered at 0, 60°, 120°, 180°, 240°, 300°
                 let sector = Int((ang / (2 * .pi)) * 6) % 6
 
                 // Keep the closest candidate per sector
                 if d2 < buckets[sector].dist2 {
-                    buckets[sector] = Candidate(dc: dc, dr: dr, dist2: d2, angle: ang)
+                    buckets[sector] = Candidate(
+                        dc: dc, dr: dr, dist2: d2, angle: ang)
                 }
             }
         }
 
         // Extract valid buckets
-        let found = buckets.compactMap { $0.dist2.isFinite ? ($0.dc, $0.dr) : nil }
+        let found = buckets.compactMap {
+            $0.dist2.isFinite ? ($0.dc, $0.dr) : nil
+        }
         // As a sanity check, ensure we have 6 unique deltas
         let unique = Array(Set(found.map { "\($0.0),\($0.1)" })).count
 
@@ -463,33 +428,154 @@ if debugMode {
         } else {
             // Fallback: a reasonable even-q guess (rows top=0 increasing downward).
             // This keeps you running even if the scan failed for some reason.
-            self.hexDeltas = [(+1,0), (+1,-1), (0,-1), (-1,0), (0,+1), (+1,+1)]
+            self.hexDeltas = [
+                (+1, 0), (+1, -1), (0, -1), (-1, 0), (0, +1), (+1, +1),
+            ]
         }
 
         #if DEBUG
-        print("Derived hex deltas (dc,dr):", self.hexDeltas ?? [])
+            print("Derived hex deltas (dc,dr):", self.hexDeltas ?? [])
         #endif
     }
 
-    // DEBUG: draw (c,r) labels on every tile
+    
+    
+    
+    
+    
+    
+    
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for t in touches {
+            let p = t.location(in: self)
+            #if DEBUG
+                touchViz.show(at: p, in: self)
+            #endif
+        }
+        super.touchesBegan(touches, with: event)
+    }
+
+
     #if DEBUG
-    private func addDebugCRLabels() {
-        for r in 0..<map.numberOfRows {
-            for c in 0..<map.numberOfColumns {
+        private func clearDebugDots() {
+            for n in debugDots { n.removeFromParent() }
+            debugDots.removeAll()
+        }
+
+        private func dot(at p: CGPoint, radius: CGFloat = 6, color: SKColor)
+            -> SKShapeNode
+        {
+            let n = SKShapeNode(circleOfRadius: radius)
+            n.position = p
+            n.fillColor = color
+            n.strokeColor = color
+            n.lineWidth = 1
+            n.zPosition = 2000
+            return n
+        }
+
+        /// Draw numbered dots on the 6 neighbors and print details
+        private func showDebugNeighbors(from c0: Int, r0: Int) {
+            guard debugMode else { return }
+            clearDebugDots()
+
+            // Draw a dot at center tile
+            let p0 = map.centerOfTile(atColumn: c0, row: r0)
+            let centerDot = dot(at: p0, radius: 8, color: .yellow)
+            map.addChild(centerDot)
+            debugDots.append(centerDot)
+
+            // Collect & sort candidates by distance so we can see why 6 were chosen
+            struct Cand {
+                let c: Int
+                let r: Int
+                let d2: CGFloat
+            }
+            var cands: [Cand] = []
+            for dr in -2...2 {
+                for dc in -2...2 {
+                    if dc == 0 && dr == 0 { continue }
+                    let c = c0 + dc
+                    let r = r0 + dr
+                    if !isInBounds(c, r) { continue }
+                    let p = map.centerOfTile(atColumn: c, row: r)
+                    let dx = p.x - p0.x
+                    let dy = p.y - p0.y
+                    let d2 = dx * dx + dy * dy
+                    cands.append(Cand(c: c, r: r, d2: d2))
+                }
+            }
+            cands.sort { $0.d2 < $1.d2 }
+
+            // Pick first 6 unique
+            var chosen: [(Int, Int, CGFloat)] = []
+            var seen = Set<String>()
+            for cand in cands {
+                let key = "\(cand.c),\(cand.r)"
+                if seen.contains(key) { continue }
+                seen.insert(key)
+                chosen.append((cand.c, cand.r, cand.d2))
+                if chosen.count == 6 { break }
+            }
+
+            // Print the chosen 6 with distances
+            let list = chosen.map { "(\($0.0),\($0.1)) d2=\(Int($0.2))" }
+                .joined(separator: ", ")
+            print("DEBUG chosen 6 from (\(c0),\(r0)): [\(list)]")
+
+            // Draw dots for the chosen 6 (green) and a small index label
+            for (idx, entry) in chosen.enumerated() {
+                let (c, r, _) = entry
                 let p = map.centerOfTile(atColumn: c, row: r)
+                let d = dot(at: p, radius: 5, color: .green)
+                map.addChild(d)
+                debugDots.append(d)
+
                 let label = SKLabelNode(fontNamed: "Menlo")
-                label.fontSize = 12
-                label.zPosition = 999
-                label.text = "\(c),\(r)"           // top-zero indexing
-                // Or bottom-zero if preferred:
-                // let bottomRow = (map.numberOfRows - 1) - r
-                // label.text = "\(c),\(bottomRow)"
-                label.position = p
+                label.fontSize = 10
+                label.text = "\(idx)"
+                label.fontColor = .white
                 label.verticalAlignmentMode = .center
                 label.horizontalAlignmentMode = .center
+                label.position = CGPoint(x: p.x, y: p.y + 12)
+                label.zPosition = 2001
                 map.addChild(label)
+                debugDots.append(label)
             }
         }
-    }
+    #endif
+
+    #if DEBUG
+        private func printNeighbors(of c: Int, _ r: Int) {
+            let neigh = nearestSixNeighbors(from: c, r0: r)
+            print("Neighbors(\(c),\(r)) -> \(neigh)")
+        }
+    #endif
+
+
+
+    
+    // DEBUG: draw (c,r) labels on every tile
+    // DEBUG: overlay coordinate labels on each tile
+    #if DEBUG
+        private func addDebugCRLabels() {
+            for r in 0..<map.numberOfRows {
+                for c in 0..<map.numberOfColumns {
+                    let p = map.centerOfTile(atColumn: c, row: r)
+                    let label = SKLabelNode(fontNamed: "Menlo")
+                    label.fontSize = 12
+                    label.zPosition = 999
+                    label.text = "\(c),\(r)"  // top-zero indexing
+                    // Or bottom-zero if preferred:
+                    // let bottomRow = (map.numberOfRows - 1) - r
+                    // label.text = "\(c),\(bottomRow)"
+                    label.position = p
+                    label.verticalAlignmentMode = .center
+                    label.horizontalAlignmentMode = .center
+                    map.addChild(label)
+                }
+            }
+        }
     #endif
 }
