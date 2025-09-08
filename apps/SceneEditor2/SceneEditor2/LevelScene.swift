@@ -1,5 +1,10 @@
 import SpriteKit
 
+// from redblobgames.com
+// This might be a even-R grid, since even columns are shoved right.
+// the only caveat is that on the website, they use (c=0,r=0) as top left
+// whereas here its on lower left
+
 final class LevelScene: SKScene {
 
     // === Core state ===
@@ -114,8 +119,11 @@ final class LevelScene: SKScene {
         let targetH = map.tileSize.height * 0.9
         u.setScale(targetH / unitTex.size().height)
 
-        let startC = max(0, map.numberOfColumns / 2)
-        let startR = max(0, map.numberOfRows / 2)
+        // place unit in center
+        //let startC = max(0, map.numberOfColumns / 2)
+        //let startR = max(0, map.numberOfRows / 2)
+        let startC = 0
+        let startR = 1
         u.position = map.centerOfTile(atColumn: startC, row: startR)
         u.zPosition = overlay.zPosition + 50
 
@@ -148,6 +156,16 @@ final class LevelScene: SKScene {
 
     // MARK: - Input
 
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for t in touches {
+            let p = t.location(in: self)
+            #if DEBUG
+                touchViz.show(at: p, in: self)
+            #endif
+        }
+        super.touchesBegan(touches, with: event)
+    }
+    
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let t = touches.first else { return }
         let pMap = t.location(in: map)
@@ -180,11 +198,6 @@ final class LevelScene: SKScene {
     
     // MARK: - Helpers
     
-    #if DEBUG
-        private let touchViz = TouchVisualizer()
-    #endif
-
-    // MARK: - Helpers
 
     // Bounds guard: ensure column/row are valid indices
     private func isInBounds(_ c: Int, _ r: Int) -> Bool {
@@ -429,139 +442,127 @@ final class LevelScene: SKScene {
     
     
     
-    
+    // MARK: - Debug
+
     
 
-    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        for t in touches {
-            let p = t.location(in: self)
-            #if DEBUG
-                touchViz.show(at: p, in: self)
-            #endif
-        }
-        super.touchesBegan(touches, with: event)
+#if DEBUG
+    private let touchViz = TouchVisualizer()
+    private func clearDebugDots() {
+        for n in debugDots { n.removeFromParent() }
+        debugDots.removeAll()
     }
 
+    private func dot(at p: CGPoint,
+                radius: CGFloat = 6,
+                color: SKColor) -> SKShapeNode {
+        
+        let n = SKShapeNode(circleOfRadius: radius)
+        n.position = p
+        n.fillColor = color
+        n.strokeColor = color
+        n.lineWidth = 1
+        n.zPosition = 2000
+        return n
+    }
 
-    #if DEBUG
-        private func clearDebugDots() {
-            for n in debugDots { n.removeFromParent() }
-            debugDots.removeAll()
+    /// Draw numbered dots on the 6 neighbors and print details
+    private func showDebugNeighbors(from c0: Int, r0: Int) {
+        guard debugMode else { return }
+        clearDebugDots()
+
+        // Draw a dot at center tile
+        let p0 = map.centerOfTile(atColumn: c0, row: r0)
+        let centerDot = dot(at: p0, radius: 8, color: .yellow)
+        map.addChild(centerDot)
+        debugDots.append(centerDot)
+
+        // Collect & sort candidates by distance so we can see why 6 were chosen
+        struct Cand {
+            let c: Int
+            let r: Int
+            let d2: CGFloat
         }
-
-        private func dot(at p: CGPoint, radius: CGFloat = 6, color: SKColor)
-            -> SKShapeNode
-        {
-            let n = SKShapeNode(circleOfRadius: radius)
-            n.position = p
-            n.fillColor = color
-            n.strokeColor = color
-            n.lineWidth = 1
-            n.zPosition = 2000
-            return n
-        }
-
-        /// Draw numbered dots on the 6 neighbors and print details
-        private func showDebugNeighbors(from c0: Int, r0: Int) {
-            guard debugMode else { return }
-            clearDebugDots()
-
-            // Draw a dot at center tile
-            let p0 = map.centerOfTile(atColumn: c0, row: r0)
-            let centerDot = dot(at: p0, radius: 8, color: .yellow)
-            map.addChild(centerDot)
-            debugDots.append(centerDot)
-
-            // Collect & sort candidates by distance so we can see why 6 were chosen
-            struct Cand {
-                let c: Int
-                let r: Int
-                let d2: CGFloat
-            }
-            var cands: [Cand] = []
-            for dr in -2...2 {
-                for dc in -2...2 {
-                    if dc == 0 && dr == 0 { continue }
-                    let c = c0 + dc
-                    let r = r0 + dr
-                    if !isInBounds(c, r) { continue }
-                    let p = map.centerOfTile(atColumn: c, row: r)
-                    let dx = p.x - p0.x
-                    let dy = p.y - p0.y
-                    let d2 = dx * dx + dy * dy
-                    cands.append(Cand(c: c, r: r, d2: d2))
-                }
-            }
-            cands.sort { $0.d2 < $1.d2 }
-
-            // Pick first 6 unique
-            var chosen: [(Int, Int, CGFloat)] = []
-            var seen = Set<String>()
-            for cand in cands {
-                let key = "\(cand.c),\(cand.r)"
-                if seen.contains(key) { continue }
-                seen.insert(key)
-                chosen.append((cand.c, cand.r, cand.d2))
-                if chosen.count == 6 { break }
-            }
-
-            // Print the chosen 6 with distances
-            let list = chosen.map { "(\($0.0),\($0.1)) d2=\(Int($0.2))" }
-                .joined(separator: ", ")
-            print("DEBUG chosen 6 from (\(c0),\(r0)): [\(list)]")
-
-            // Draw dots for the chosen 6 (green) and a small index label
-            for (idx, entry) in chosen.enumerated() {
-                let (c, r, _) = entry
+        var cands: [Cand] = []
+        for dr in -2...2 {
+            for dc in -2...2 {
+                if dc == 0 && dr == 0 { continue }
+                let c = c0 + dc
+                let r = r0 + dr
+                if !isInBounds(c, r) { continue }
                 let p = map.centerOfTile(atColumn: c, row: r)
-                let d = dot(at: p, radius: 5, color: .green)
-                map.addChild(d)
-                debugDots.append(d)
-
-                let label = SKLabelNode(fontNamed: "Menlo")
-                label.fontSize = 10
-                label.text = "\(idx)"
-                label.fontColor = .white
-                label.verticalAlignmentMode = .center
-                label.horizontalAlignmentMode = .center
-                label.position = CGPoint(x: p.x, y: p.y + 12)
-                label.zPosition = 2001
-                map.addChild(label)
-                debugDots.append(label)
+                let dx = p.x - p0.x
+                let dy = p.y - p0.y
+                let d2 = dx * dx + dy * dy
+                cands.append(Cand(c: c, r: r, d2: d2))
             }
         }
-    #endif
+        cands.sort { $0.d2 < $1.d2 }
 
-    #if DEBUG
-        private func printNeighbors(of c: Int, _ r: Int) {
-            let neigh = nearestSixNeighbors(from: c, r0: r)
-            print("Neighbors(\(c),\(r)) -> \(neigh)")
+        // Pick first 6 unique
+        var chosen: [(Int, Int, CGFloat)] = []
+        var seen = Set<String>()
+        for cand in cands {
+            let key = "\(cand.c),\(cand.r)"
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            chosen.append((cand.c, cand.r, cand.d2))
+            if chosen.count == 6 { break }
         }
-    #endif
+
+        // Print the chosen 6 with distances
+        let list = chosen.map { "(\($0.0),\($0.1)) d2=\(Int($0.2))" }
+            .joined(separator: ", ")
+        print("DEBUG chosen 6 from (\(c0),\(r0)): [\(list)]")
+
+        // Draw dots for the chosen 6 (green) and a small index label
+        for (idx, entry) in chosen.enumerated() {
+            let (c, r, _) = entry
+            let p = map.centerOfTile(atColumn: c, row: r)
+            let d = dot(at: p, radius: 5, color: .green)
+            map.addChild(d)
+            debugDots.append(d)
+
+            let label = SKLabelNode(fontNamed: "Menlo")
+            label.fontSize = 10
+            label.text = "\(idx)"
+            label.fontColor = .white
+            label.verticalAlignmentMode = .center
+            label.horizontalAlignmentMode = .center
+            label.position = CGPoint(x: p.x, y: p.y + 12)
+            label.zPosition = 2001
+            map.addChild(label)
+            debugDots.append(label)
+        }
+    }
+
+    private func printNeighbors(of c: Int, _ r: Int) {
+        let neigh = nearestSixNeighbors(from: c, r0: r)
+        print("Neighbors(\(c),\(r)) -> \(neigh)")
+    }
 
 
 
     
     // DEBUG: draw (c,r) labels on every tile
     // DEBUG: overlay coordinate labels on each tile
-    #if DEBUG
-        private func addDebugCRLabels() {
-            for r in 0..<map.numberOfRows {
-                for c in 0..<map.numberOfColumns {
-                    let p = map.centerOfTile(atColumn: c, row: r)
-                    let label = SKLabelNode(fontNamed: "Menlo")
-                    label.fontSize = 12
-                    label.zPosition = 999
-                    label.text = "\(c),\(r)"  // top-zero indexing
-                    // Or bottom-zero if preferred:
-                    // let bottomRow = (map.numberOfRows - 1) - r
-                    // label.text = "\(c),\(bottomRow)"
-                    label.position = p
-                    label.verticalAlignmentMode = .center
-                    label.horizontalAlignmentMode = .center
-                    map.addChild(label)
-                }
+    private func addDebugCRLabels() {
+        for r in 0..<map.numberOfRows {
+            for c in 0..<map.numberOfColumns {
+                let p = map.centerOfTile(atColumn: c, row: r)
+                let label = SKLabelNode(fontNamed: "Menlo")
+                label.fontSize = 12
+                label.zPosition = 999
+                label.text = "\(c),\(r)"  // top-zero indexing
+                // Or bottom-zero if preferred:
+                // let bottomRow = (map.numberOfRows - 1) - r
+                // label.text = "\(c),\(bottomRow)"
+                label.position = p
+                label.verticalAlignmentMode = .center
+                label.horizontalAlignmentMode = .center
+                map.addChild(label)
             }
         }
-    #endif
+    }
+#endif
 }
