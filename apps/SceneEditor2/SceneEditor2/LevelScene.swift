@@ -8,7 +8,9 @@ final class LevelScene: SKScene {
 
 
     // Strong refs; the scene owns these nodes.
+    private var map: SKTileMapNode!
     private var unit: SKSpriteNode!
+    private var highlightMap: SKTileMapNode!
     private var highlightGroup: SKTileGroup!
 
   
@@ -188,6 +190,7 @@ private var debugDots: [SKNode] = []
 
     private func showMoveHighlightsFromUnit() {
         showMoveHighlights(from: unit.position)  // use the unit’s actual center
+    }
 
     // MARK: - Movement / Highlights
     private func inBounds(_ c: Int, _ r: Int) -> Bool {
