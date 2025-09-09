@@ -1,41 +1,51 @@
 
-# Scene Editor Tile Map Starter (SwiftUI + SpriteKit)
+# call map
 
-This starter loads a map you create visually in Xcode's Scene Editor (`Level1.sks`), including a Tile Map Node that uses your Asset Catalog Tile Set.
+flowchart LR
+  %% Layout
+  classDef entry fill:#cfe8ff,stroke:#2b6cb0,color:#000,stroke-width:1px
+  classDef helper fill:#fff,stroke:#555,color:#000,stroke-width:1px
+  classDef neigh fill:#fff,stroke:#888,color:#000,stroke-dasharray:3 3,stroke-width:1px
 
-## Files
-- `SceneEditorApp.swift` — SwiftUI @main entry.
-- `ContentView.swift` — Hosts the SpriteKit scene in `SpriteView`. Loads `Level1.sks`.
-- `LevelScene.swift` — Your scene class. Prints tile group names and shows them on screen.
-- You create: `Level1.sks` in Xcode (see below).
+  subgraph Lifecycle & Input
+    didMove["didMove(to:)"]:::entry
+    didChange["didChangeSize(_:)"]:::entry
+    touchesEnded["touchesEnded(_:with:)"]:::entry
+  end
 
-## 1) Create the Tile Set (Assets.xcassets)
-1. Open Assets.xcassets.
-2. Right‑click → New Tile Set → name it HexTiles (or anything).
-3. Select the Tile Set:
-   - Tile Set Type: Hexagonal Pointy (or Hexagonal Flat / Grid)
-   - Default Tile Size: e.g. 48×48 (match your art in points)
-4. Under "Tile Groups", add groups like grass, water, dirt.
-5. For each group, add a Tile Definition and assign a texture (import PNGs as Image Sets first).
+  subgraph Camera Setup
+    fitCamera["fitCamera()"]:::helper
+    computeScale["computeScale()"]:::helper
+    clampCamera["clampCameraToMap()"]:::helper
+  end
 
-## 2) Create the Scene in Scene Editor
-1. File → New → File… → SpriteKit Scene, name it Level1.sks.
-2. Open Level1.sks:
-   - Attributes Inspector → Custom Class = LevelScene.
-3. Add a Tile Map Node (⌘⇧L → Tile Map Node) into the scene.
-   - Name = Map (so code can find it).
-   - Tile Set = your set (e.g., HexTiles).
-   - Columns, Rows, Tile Size configured to match the set.
-   - Position as desired.
+  subgraph Highlights Pipeline
+    showFromUnit["showMoveHighlightsFromUnit()"]:::helper
+    showHighlights["showMoveHighlights(from:range:)"]:::helper
+    paintReachable["paintReachable(from:range:)"]:::helper
+    clearHighlights["clearHighlights()"]:::helper
+  end
 
-Paint tiles using the palette bar at the bottom of the editor.
+  subgraph Neighbor/Bounds
+    nearest["nearestSixNeighbors(c:r:)"]:::neigh
+    evenR["evenRNeighbors(c:r:)"]:::neigh
+    oddR["oddRNeighbors(c:r:)"]:::neigh
+    inBounds["isInBounds(c:r:)"]:::neigh
+  end
 
-## 3) Run it
-Build & run. ContentView loads Level1.sks as LevelScene. On launch, LevelScene finds the Tile Map named "Map", prints the Tile Set group names, and shows them at the top of the screen.
+  %% Edges
+  didMove --> fitCamera
+  didMove --> clampCamera
+  didChange --> fitCamera
+  didChange --> clampCamera
+  fitCamera --> computeScale
 
-## Troubleshooting
-- Can't find Level1.sks: ensure it's in the target and spelled exactly.
-- Cast to LevelScene fails: set Custom Class = LevelScene in the .sks.
-- No tile palette: assign a Tile Set to the Tile Map Node in the editor.
-- Tiles stretched: Tile Map's Tile Size must match the Tile Set's Default Tile Size and your art.
-- SwiftUI storyboard error: leave Main Interface blank in target settings.
+  touchesEnded --> showFromUnit
+  touchesEnded --> clearHighlights
+  showFromUnit --> showHighlights
+  showHighlights --> paintReachable
+
+  paintReachable --> nearest
+  paintReachable --> evenR
+  paintReachable --> oddR
+  paintReachable --> inBounds
