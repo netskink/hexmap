@@ -1,0 +1,782 @@
+import SpriteKit
+
+// from redblobgames.com
+// This might be a even-R grid, since even columns are shoved right.
+// the only caveat is that on the website, they use (c=0,r=0) as top left
+// whereas here its on lower left
+
+final class LevelScene: SKScene {
+
+    // === Core state ===
+    // Strong refs; these nodes live for the life of the scene.
+    private var map: SKTileMapNode!         // The terrain tile map from your .sks
+    private var unit: SKSpriteNode!         // The player's movable unit
+    private var highlightMap: SKTileMapNode!// Overlay map for movement markers
+    private var highlightGroup: SKTileGroup!// TileGroup for "aMoveMarker"
+    
+    #if DEBUG
+    // Debug state: when enabled, draw visual dots/labels for neighbor checks
+    private var debugMode = false
+    private var debugDots: [SKNode] = []    // Track dots so we can clear them
+    #endif
+
+    // Movement range in tiles (currently single-step movement)
+    private let moveRange = 1
+
+    // === Geometry-derived hex neighbor offsets ===
+    // Once computed, these are the six (dc,dr) you should use for neighbors.
+    // Order is clockwise starting near +X (east).
+    // Once computed, the 6 offsets (dc,dr) for hex neighbors
+    // These are derived at runtime from geometry rather than hard-coded.
+    private var hexDeltas: [(Int, Int)]?
+
+    // MARK: - Scene lifecycle
+
+    override func didMove(to view: SKView) {
+        // Prevent re-initialization if scene is re-entered
+        guard highlightMap == nil else { return }
+        backgroundColor = .black
+
+        // A) Get the terrain map from the scene (by name or first tile map found).
+        let terrain =
+            (childNode(withName: "Tile Map Node") as? SKTileMapNode)
+            ?? (children.compactMap { $0 as? SKTileMapNode }.first)
+
+        guard let map = terrain else {
+            assertionFailure(
+                "No SKTileMapNode found. Name it 'Tile Map Node' or add one to the scene."
+            )
+            return
+        }
+        self.map = map
+
+        // (Optional) DEBUG: render (c,r) labels on every tile to validate indexing.
+        #if DEBUG
+            addDebugCRLabels()
+        #endif
+
+        // Center map in the scene (safe default)
+        map.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+        map.position = CGPoint(x: size.width / 2, y: size.height / 2)
+
+
+        // Center camera on map and zoom to fit
+        //let mapBounds = map.calculateAccumulatedFrame()
+        //cam.position = CGPoint(x: mapBounds.midX, y: mapBounds.midY)
+
+        // Correct fit math: smaller scale shows more world
+        //let wRatio = mapBounds.width / size.width
+        //let hRatio = mapBounds.height / size.height
+        //let fitScale = 1.0 / max(wRatio, hRatio) * 0.95  // 5% padding inside the edges
+        //cam.setScale(max(fitScale, 1e-3))  // avoid divide by zero
+        
+        fitCamera(to: map, in: view, padding: 16)  // <- nice comfy padding
+        clampCameraToMap()
+
+        // B) Build the highlight marker tileset from asset "aMoveMarker"
+        let markerTex = SKTexture(imageNamed: "aMoveMarker")
+        markerTex.filteringMode = .nearest  // optional: crisper pixels
+        let def = SKTileDefinition(texture: markerTex, size: map.tileSize)
+        let group = SKTileGroup(tileDefinition: def)
+        group.name = "moveHighlight"
+        self.highlightGroup = group
+
+        // Wrap that group in a tiny TileSet
+        let overlaySet = SKTileSet(tileGroups: [group],
+                               tileSetType: .hexagonalPointy)
+        overlaySet.defaultTileSize = map.tileSize
+
+        // C) Create an overlay tile map (same grid) for highlights only
+        // C) Create overlay tile map for highlights (same size as terrain)
+        let overlay = SKTileMapNode(
+            tileSet: overlaySet,
+            columns: map.numberOfColumns,
+            rows: map.numberOfRows,
+            tileSize: map.tileSize)
+        overlay.enableAutomapping = false
+        overlay.zPosition = map.zPosition + 50
+
+        // Attach overlay to the map so any future map moves/pans also move highlights.
+        // Attach overlay as a child of the map (keeps it aligned automatically)
+        map.addChild(overlay)
+        // Keep overlay perfectly aligned with map
+        overlay.anchorPoint = map.anchorPoint
+        overlay.position = .zero
+
+        self.highlightMap = overlay
+
+        // D) Add your unit from Image Set "aBlueUnit"
+        // D) Add the movable unit sprite ("aBlueUnit") at map center
+        let unitTex = SKTexture(imageNamed: "aBlueUnit")
+        unitTex.filteringMode = .nearest  // optional: crisper pixels
+        let u = SKSpriteNode(texture: unitTex)
+        let targetH = map.tileSize.height * 0.9
+        u.setScale(targetH / unitTex.size().height)
+
+        // place unit in center
+        //let startC = max(0, map.numberOfColumns / 2)
+        //let startR = max(0, map.numberOfRows / 2)
+        let startC = 0
+        let startR = 1
+        u.position = map.centerOfTile(atColumn: startC, row: startR)
+        u.zPosition = overlay.zPosition + 50
+
+        // Put the unit on the map so it lives in the same coordinate space
+        map.addChild(u)
+        self.unit = u
+
+        // E) Derive the six neighbor deltas from geometry (once).
+        // E) Compute the six (dc,dr) hex neighbor offsets once from geometry
+        deriveHexDeltas()
+        
+    #if DEBUG
+        detectOffsetModel()
+        probe(startC, startR)
+    #endif
+
+    }
+
+
+    
+    // Re-fit camera if the scene size changes (rotation, split view, etc.)
+    // Handle scene size changes (rotation, split view, etc.)
+    override func didChangeSize(_ oldSize: CGSize) {
+        guard let view = self.view, map != nil else { return }
+        // Re-center the map (since the scene size changed)
+        map.position = CGPoint(x: size.width/2, y: size.height/2)
+        fitCamera(to: map, in: view, padding: 16)
+    }
+
+    private func clampCameraToMap() {
+        guard let cam = camera else { return }
+        let r = map.calculateAccumulatedFrame()
+        cam.constraints = [
+            SKConstraint.positionX(SKRange(lowerLimit: r.minX, upperLimit: r.maxX)),
+            SKConstraint.positionY(SKRange(lowerLimit: r.minY, upperLimit: r.maxY))
+        ]
+    }
+    
+    // MARK: - Input
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        for t in touches {
+            let p = t.location(in: self)
+            #if DEBUG
+                touchViz.show(at: p, in: self)
+            #endif
+        }
+        super.touchesBegan(touches, with: event)
+    }
+    
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let t = touches.first else { return }
+        let pMap = t.location(in: map)
+
+        // Did we tap the unit?
+        // If the unit was tapped → show possible moves
+        if let parent = unit.parent, unit.contains(t.location(in: parent)) {
+            showMoveHighlightsFromUnit()  // use the unit’s actual center
+            return
+        }
+
+        // Otherwise, if tapped on a highlighted tile → move the unit
+        // Tap on a highlighted tile to move the unit there
+        let c = map.tileColumnIndex(fromPosition: pMap)
+        let r = map.tileRowIndex(fromPosition: pMap)
+        
+        
+        
+        if isInBounds(c, r),  // first check that indices are inside the map
+           highlightMap.tileGroup(atColumn: c, row: r) != nil,  // check for highlighted
+           map.tileGroup(atColumn: c, row: r)?.name != "watergroup"  // check not in water
+        {
+            // touch location is permissable
+            let dest = map.centerOfTile(atColumn: c, row: r)
+            unit.run(.move(to: dest, duration: 0.2))
+        }
+        clearHighlights()
+    }
+
+    
+    // MARK: - Helpers
+    
+
+    // Bounds guard: ensure column/row are valid indices
+    private func isInBounds(_ c: Int, _ r: Int) -> Bool {
+        c >= 0 && c < map.numberOfColumns && r >= 0 && r < map.numberOfRows
+    }
+
+    // Convenience: show highlights starting from current unit position
+    private func showMoveHighlightsFromUnit() {
+        showMoveHighlights(from: unit.position)  // use the unit’s actual center
+    }
+
+    // Clear highlight overlay completely
+    private func clearHighlights() {
+        guard highlightMap != nil else { return }
+        for r in 0..<highlightMap.numberOfRows {
+            for c in 0..<highlightMap.numberOfColumns {
+                highlightMap.setTileGroup(nil, forColumn: c, row: r)
+            }
+        }
+    }
+
+    /// Zoom the camera so `target` (your map) fits inside the visible screen,
+    /// respecting safe areas and adding a little padding.
+    /// Zoom the camera so `target` fits inside the screen's *usable* area.
+    /// Works on rotation by deferring one runloop so safeAreaInsets are final.
+    private func fitCamera(to target: SKNode, in view: SKView, padding: CGFloat = 16) {
+        // Ensure a camera exists
+        if camera == nil {
+            let cam = SKCameraNode()
+            addChild(cam)
+            self.camera = cam
+        }
+
+        // 1) Center the thing we want to show (important before measuring)
+        let targetFrame = target.calculateAccumulatedFrame()
+        camera?.position = CGPoint(x: targetFrame.midX, y: targetFrame.midY)
+
+        // 2) Compute the scale using *current* safe area (may still be stale)
+        func computeScale(using insets: UIEdgeInsets) -> CGFloat {
+            // Scene is .resizeFill so scene.size matches view.bounds (in points)
+            let usableW = max(view.bounds.width  - (insets.left + insets.right)  - padding * 2, 1)
+            let usableH = max(view.bounds.height - (insets.top  + insets.bottom) - padding * 2, 1)
+            let scaleX = targetFrame.width  / usableW
+            let scaleY = targetFrame.height / usableH
+            return max(scaleX, scaleY)
+        }
+
+        // 3) Do an immediate guess (good enough for most cases)…
+        let immediateScale = computeScale(using: view.safeAreaInsets)
+        camera?.setScale(max(immediateScale, 1e-3))
+
+        // 4) …then fix it on the next runloop tick when insets settle after rotation
+        DispatchQueue.main.async { [weak self, weak view] in
+            guard let self, let view else { return }
+            let settledScale = computeScale(using: view.safeAreaInsets)
+            self.camera?.setScale(max(settledScale, 1e-3))
+        }
+    }
+    
+    // === Highlight neighbors and reachable tiles ===
+    private func showMoveHighlights(from unitPosInMap: CGPoint) {
+        clearHighlights()
+
+        let startC = map.tileColumnIndex(fromPosition: unitPosInMap)
+        let startR = map.tileRowIndex(fromPosition: unitPosInMap)
+        #if DEBUG
+            if debugMode {
+                showDebugNeighbors(from: startC, r0: startR)
+            }
+        #endif
+        guard isInBounds(startC, startR) else { return }
+
+        #if DEBUG
+            print("Start tile (c,r) = (\(startC),\(startR))")
+            if let deltas = hexDeltas { print("Using hex deltas:", deltas) }
+        #endif
+
+        //func hexNeighborsMeasured(_ c: Int, _ r: Int) -> [(Int, Int)] {
+        //    return nearestSixNeighbors(from: c, r0: r)
+        //}
+        // replace the geometry-based neighbors with the deterministic even-r neighbors:
+        //func hexNeighborsMeasured(_ c: Int, _ r: Int) -> [(Int, Int)] {
+        //    return evenRNeighbors(c, r)  // <- use this if you want exact even-r logic
+        //}
+        func hexNeighborsMeasured(_ c: Int, _ r: Int) -> [(Int, Int)] {
+            return oddRNeighborsBL(c, r)   // <- odd-R per detector
+        }
+        
+        paintReachable(fromC: startC,
+                  fromR: startR,
+                  range: moveRange,
+                  neighbors: hexNeighborsMeasured)
+
+        
+    }
+
+    
+    // Generic BFS painter
+    // === BFS traversal to find reachable tiles ===
+    private func paintReachable(fromC: Int,
+                        fromR: Int,
+                        range: Int,
+                        neighbors: (Int, Int) -> [(Int, Int)]) {
+        
+        var visited = Set<[Int]>()
+        var queue: [(c: Int, r: Int, d: Int)] = [(fromC, fromR, 0)]
+        visited.insert([fromC, fromR])
+
+        while !queue.isEmpty {
+            let cur = queue.removeFirst()
+
+            // Skip painting the start tile; paint all others within range
+            if cur.d > 0 {
+                highlightMap.setTileGroup(
+                    highlightGroup, forColumn: cur.c, row: cur.r)
+            }
+            if cur.d == range { continue }
+
+            for (nc, nr) in neighbors(cur.c, cur.r) {
+                if isInBounds(nc, nr) && !visited.contains([nc, nr]) {
+
+                    // Terrain check: skip water tiles entirely (no ring, no traversal).
+                    // If you prefer to show blocked tiles, paint here and do not enqueue.
+                    if let name = map.tileGroup(atColumn: nc, row: nr)?.name,
+                        name == "watergroup"
+                    {
+                        continue
+                    }
+
+                    visited.insert([nc, nr])
+                    queue.append((nc, nr, cur.d + 1))
+                }
+            }
+        }
+    }
+
+    
+    // === Geometry-based neighbor finder ===
+    // Collects surrounding tiles and selects the six closest centers
+    // so we always get proper hex neighbors even near edges.
+    // Returns the 6 nearest neighbor tile coordinates around (c0,r0)
+    // by looking at centers and picking the six closest tiles.
+    // Works regardless of even/odd column or row direction.
+    // Returns the ~6 nearest neighbor tile coordinates around (c0,r0),
+    // constrained by a distance band so we don't accidentally include
+    // far tiles when we're near the edge of the map.
+    private func nearestSixNeighbors(from c0: Int, r0: Int) -> [(Int, Int)] {
+        
+        struct Cand {
+            let c: Int
+            let r: Int
+            let d2: CGFloat
+        }
+        let p0 = map.centerOfTile(atColumn: c0, row: r0)
+
+        var cands: [Cand] = []
+        for dr in -2...2 {
+            for dc in -2...2 {
+                if dc == 0 && dr == 0 { continue }
+                let c = c0 + dc
+                let r = r0 + dr
+                if !isInBounds(c, r) { continue }
+                let p = map.centerOfTile(atColumn: c, row: r)
+                let dx = p.x - p0.x
+                let dy = p.y - p0.y
+                let d2 = dx * dx + dy * dy
+                cands.append(Cand(c: c, r: r, d2: d2))
+            }
+        }
+
+        // Sort by distance; find the closest ring distance
+        cands.sort { $0.d2 < $1.d2 }
+        guard let base = cands.first?.d2, base.isFinite else { return [] }
+
+        // Accept candidates within a tight band around the closest distance.
+        // This prevents tiles ~2 steps away like (0,0) from sneaking in.
+        // Tweak multipliers if needed; these are usually perfect for SK hex spacing.
+        let cutoffTight: CGFloat = base * 1.35  // primary ring
+        let cutoffLoose: CGFloat = base * 1.75  // fallback if we got < 6
+
+        var out: [(Int, Int)] = []
+        var seen = Set<String>()
+
+        // 1) Take unique neighbors within the tight band
+        for cand in cands where cand.d2 <= cutoffTight {
+            let key = "\(cand.c),\(cand.r)"
+            if seen.insert(key).inserted {
+                out.append((cand.c, cand.r))
+                if out.count == 6 { return out }
+            }
+        }
+
+        // 2) If we still have < 6 (edge cases), allow a slightly looser band.
+        for cand in cands where cand.d2 <= cutoffLoose {
+            let key = "\(cand.c),\(cand.r)"
+            if seen.insert(key).inserted {
+                out.append((cand.c, cand.r))
+                if out.count == 6 { break }
+            }
+        }
+
+        // Return however many we have (can be < 6 at edges; that's OK).
+        return out
+    }
+
+        
+    
+    /// Even-R neighbors (pointy-top, row-offset) with bottom-left origin
+    private func evenRNeighbors(_ c: Int, _ r: Int) -> [(Int, Int)] {
+        if r % 2 == 0 {
+            // even row shifted right
+            return [
+                (c+1, r),   // E
+                (c,   r+1), // NE
+                (c-1, r+1), // NW
+                (c-1, r),   // W
+                (c-1, r-1), // SW
+                (c,   r-1)  // SE
+            ]
+        } else {
+            // odd row not shifted
+            return [
+                (c+1, r),   // E
+                (c+1, r+1), // NE
+                (c,   r+1), // NW
+                (c-1, r),   // W
+                (c,   r-1), // SW
+                (c+1, r-1)  // SE
+            ]
+        }
+    }
+    
+    
+    /// Pointy-top, row-offset (R), bottom-left origin.
+    /// Use this when **odd rows are shifted right** (odd-R).
+    private func oddRNeighborsBL(_ c: Int, _ r: Int) -> [(Int, Int)] {
+        if r % 2 == 1 {  // odd row shifted right
+            return [
+                (c+1, r),   // E
+                (c+1, r+1), // NE
+                (c,   r+1), // NW
+                (c-1, r),   // W
+                (c,   r-1), // SW
+                (c+1, r-1)  // SE
+            ]
+        } else {         // even row not shifted
+            return [
+                (c+1, r),   // E
+                (c,   r+1), // NE
+                (c-1, r+1), // NW
+                (c-1, r),   // W
+                (c-1, r-1), // SW
+                (c,   r-1)  // SE
+            ]
+        }
+    }
+
+    /// If you ever have **even rows shifted right** (even-R), use this one instead.
+    private func evenRNeighborsBL(_ c: Int, _ r: Int) -> [(Int, Int)] {
+        if r % 2 == 0 {  // even row shifted right
+            return [
+                (c+1, r),   // E
+                (c,   r+1), // NE
+                (c-1, r+1), // NW
+                (c-1, r),   // W
+                (c-1, r-1), // SW
+                (c,   r-1)  // SE
+            ]
+        } else {         // odd row not shifted
+            return [
+                (c+1, r),   // E
+                (c+1, r+1), // NE
+                (c,   r+1), // NW
+                (c-1, r),   // W
+                (c,   r-1), // SW
+                (c+1, r-1)  // SE
+            ]
+        }
+    }
+    
+    // === Calibration of hex deltas (optional) ===
+    // Uses a center tile, scans neighbors, and buckets by angle
+    // to derive a consistent set of (dc,dr) offsets.
+    // === Geometry-based neighbor calibration ===
+    // We find the six neighboring tiles around a center tile by
+    // scanning nearby tiles, bucketing by polar angle into 6 sectors,
+    // and picking the nearest in each sector. That gives robust (dc,dr)
+    // for THIS map’s offset/parity/row direction—no guessing.
+    private func deriveHexDeltas() {
+        // Choose a safe center tile away from edges
+        let c0 = max(1, min(map.numberOfColumns - 2, map.numberOfColumns / 2))
+        let r0 = max(1, min(map.numberOfRows - 2, map.numberOfRows / 2))
+        let p0 = map.centerOfTile(atColumn: c0, row: r0)
+
+        struct Candidate {
+            let dc: Int
+            let dr: Int
+            let dist2: CGFloat
+            let angle: CGFloat
+        }
+
+        var buckets = Array(
+            repeating: Candidate(dc: 0, dr: 0, dist2: .infinity, angle: 0),
+            count: 6)
+
+        // Scan a small neighborhood around (c0,r0)
+        // Scan a 5×5 box around the center
+        for dr in -2...2 {
+            for dc in -2...2 {
+                if dc == 0 && dr == 0 { continue }
+                let c = c0 + dc
+                let r = r0 + dr
+                if !isInBounds(c, r) { continue }
+
+                let p = map.centerOfTile(atColumn: c, row: r)
+                let dx = p.x - p0.x
+                let dy = p.y - p0.y
+                let d2 = dx * dx + dy * dy
+                // Ignore far tiles; keep those near 1 tile away
+                // Use a generous radius band to accommodate any spacing.
+                let minD2 = pow(
+                    min(map.tileSize.width, map.tileSize.height) * 0.5, 0.6)
+                let maxD2 = pow(
+                    max(map.tileSize.width, map.tileSize.height) * 0.9, 0.9)
+                if d2 < minD2 || d2 > maxD2 { continue }
+
+                var ang = atan2(dy, dx)  // radians, -π..π, 0 along +X (east)
+                if ang < 0 { ang += 2 * .pi }  // 0..2π
+
+                // 6 sectors centered at 0, 60°, 120°, 180°, 240°, 300°
+                let sector = Int((ang / (2 * .pi)) * 6) % 6
+
+                // Keep the closest candidate per sector
+                if d2 < buckets[sector].dist2 {
+                    buckets[sector] = Candidate(
+                        dc: dc, dr: dr, dist2: d2, angle: ang)
+                }
+            }
+        }
+
+        // Extract valid buckets
+        let found = buckets.compactMap {
+            $0.dist2.isFinite ? ($0.dc, $0.dr) : nil
+        }
+        // As a sanity check, ensure we have 6 unique deltas
+        let unique = Array(Set(found.map { "\($0.0),\($0.1)" })).count
+
+        if found.count == 6 && unique == 6 {
+            self.hexDeltas = found
+        } else {
+            // Fallback: a reasonable even-q guess (rows top=0 increasing downward).
+            // This keeps you running even if the scan failed for some reason.
+            self.hexDeltas = [
+                (+1, 0), (+1, -1), (0, -1), (-1, 0), (0, +1), (+1, +1),
+            ]
+        }
+
+        #if DEBUG
+            print("Derived hex deltas (dc,dr):", self.hexDeltas ?? [])
+        #endif
+    }
+
+    
+    
+    
+    
+    
+    // MARK: - Debug
+
+    
+
+#if DEBUG
+    private let touchViz = TouchVisualizer()
+    private func clearDebugDots() {
+        for n in debugDots { n.removeFromParent() }
+        debugDots.removeAll()
+    }
+
+    private func dot(at p: CGPoint,
+                radius: CGFloat = 6,
+                color: SKColor) -> SKShapeNode {
+        
+        let n = SKShapeNode(circleOfRadius: radius)
+        n.position = p
+        n.fillColor = color
+        n.strokeColor = color
+        n.lineWidth = 1
+        n.zPosition = 2000
+        return n
+    }
+
+    /// Draw numbered dots on the 6 neighbors and print details
+    private func showDebugNeighbors(from c0: Int, r0: Int) {
+        guard debugMode else { return }
+        clearDebugDots()
+
+        // Draw a dot at center tile
+        let p0 = map.centerOfTile(atColumn: c0, row: r0)
+        let centerDot = dot(at: p0, radius: 8, color: .yellow)
+        map.addChild(centerDot)
+        debugDots.append(centerDot)
+
+        // Collect & sort candidates by distance so we can see why 6 were chosen
+        struct Cand {
+            let c: Int
+            let r: Int
+            let d2: CGFloat
+        }
+        var cands: [Cand] = []
+        for dr in -2...2 {
+            for dc in -2...2 {
+                if dc == 0 && dr == 0 { continue }
+                let c = c0 + dc
+                let r = r0 + dr
+                if !isInBounds(c, r) { continue }
+                let p = map.centerOfTile(atColumn: c, row: r)
+                let dx = p.x - p0.x
+                let dy = p.y - p0.y
+                let d2 = dx * dx + dy * dy
+                cands.append(Cand(c: c, r: r, d2: d2))
+            }
+        }
+        cands.sort { $0.d2 < $1.d2 }
+
+        // Pick first 6 unique
+        var chosen: [(Int, Int, CGFloat)] = []
+        var seen = Set<String>()
+        for cand in cands {
+            let key = "\(cand.c),\(cand.r)"
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            chosen.append((cand.c, cand.r, cand.d2))
+            if chosen.count == 6 { break }
+        }
+
+        // Print the chosen 6 with distances
+        let list = chosen.map { "(\($0.0),\($0.1)) d2=\(Int($0.2))" }
+            .joined(separator: ", ")
+        print("DEBUG chosen 6 from (\(c0),\(r0)): [\(list)]")
+
+        // Draw dots for the chosen 6 (green) and a small index label
+        for (idx, entry) in chosen.enumerated() {
+            let (c, r, _) = entry
+            let p = map.centerOfTile(atColumn: c, row: r)
+            let d = dot(at: p, radius: 5, color: .green)
+            map.addChild(d)
+            debugDots.append(d)
+
+            let label = SKLabelNode(fontNamed: "Menlo")
+            label.fontSize = 10
+            label.text = "\(idx)"
+            label.fontColor = .white
+            label.verticalAlignmentMode = .center
+            label.horizontalAlignmentMode = .center
+            label.position = CGPoint(x: p.x, y: p.y + 12)
+            label.zPosition = 2001
+            map.addChild(label)
+            debugDots.append(label)
+        }
+    }
+
+    private func printNeighbors(of c: Int, _ r: Int) {
+        let neigh = nearestSixNeighbors(from: c, r0: r)
+        print("Neighbors(\(c),\(r)) -> \(neigh)")
+    }
+
+
+
+    
+    // DEBUG: draw (c,r) labels on every tile
+    // DEBUG: overlay coordinate labels on each tile
+    private func addDebugCRLabels() {
+        for r in 0..<map.numberOfRows {
+            for c in 0..<map.numberOfColumns {
+                let p = map.centerOfTile(atColumn: c, row: r)
+                let label = SKLabelNode(fontNamed: "Menlo")
+                label.fontSize = 12
+                label.zPosition = 999
+                label.text = "\(c),\(r)"  // top-zero indexing
+                // Or bottom-zero if preferred:
+                // let bottomRow = (map.numberOfRows - 1) - r
+                // label.text = "\(c),\(bottomRow)"
+                label.position = p
+                label.verticalAlignmentMode = .center
+                label.horizontalAlignmentMode = .center
+                map.addChild(label)
+            }
+        }
+    }
+    
+    
+    
+
+    /// Call once after `self.map` is set (e.g. at end of didMove).
+    private func detectOffsetModel() {
+        // Pick an interior tile (avoid edges so neighbors exist)
+        let c0 = max(1, min(map.numberOfColumns - 2, 2))
+        let r0 = max(1, min(map.numberOfRows    - 2, 2))
+
+        let p00 = map.centerOfTile(atColumn: c0,     row: r0)
+        let pRow = map.centerOfTile(atColumn: c0,     row: r0 + 1) // same col, next row
+        let pCol = map.centerOfTile(atColumn: c0 + 1, row: r0)     // next col, same row
+
+        // How a +row or +col step moves in screen space
+        let dRow = CGVector(dx: pRow.x - p00.x, dy: pRow.y - p00.y)
+        let dCol = CGVector(dx: pCol.x - p00.x, dy: pCol.y - p00.y)
+
+        let axRow = abs(dRow.dx), ayRow = abs(dRow.dy)
+        let axCol = abs(dCol.dx), ayCol = abs(dCol.dy)
+
+        print("DETECT raw: dRow(dx:\(Int(dRow.dx)), dy:\(Int(dRow.dy)))  dCol(dx:\(Int(dCol.dx)), dy:\(Int(dCol.dy)))")
+
+        // Helper
+        @inline(__always) func ratio(_ a: CGFloat, _ b: CGFloat) -> CGFloat { a / max(b, 0.0001) }
+        let rowYvsX = ratio(ayRow, axRow)   // how vertical a row step is
+        let colXvsY = ratio(axCol, ayCol)   // how horizontal a col step is
+
+        // Log nice rounded values
+        let r1 = Double((rowYvsX * 100).rounded() / 100)
+        let r2 = Double((colXvsY * 100).rounded() / 100)
+        print("DETECT ratios: rowYvsX=\(r1)  colXvsY=\(r2)")
+
+        // Tunable thresholds
+        let STRONGLY_HORIZONTAL: CGFloat = 1.8   // col step must be very horizontal
+        let MORE_VERTICAL_THAN_HORIZONTAL: CGFloat = 1.1 // row step simply needs to favor vertical
+
+        let colIsStronglyHorizontal = colXvsY >= STRONGLY_HORIZONTAL
+        let rowIsVerticalDominant   = rowYvsX >= MORE_VERTICAL_THAN_HORIZONTAL
+
+        // POINTY-TOP (row-offset “R”): col step strongly horizontal AND
+        // row step more vertical than horizontal
+        if colIsStronglyHorizontal && rowIsVerticalDominant {
+            // Determine parity for row-offset:
+            // which row (even or odd) is shifted to the right at the same column?
+            let re = (r0 % 2 == 0) ? r0 : r0 - 1  // an even row near r0
+            let ro = re + 1                        // the next odd row
+            if re >= 0, ro < map.numberOfRows {
+                let pEven = map.centerOfTile(atColumn: c0, row: re)
+                let pOdd  = map.centerOfTile(atColumn: c0, row: ro)
+                let evenShiftRight = pEven.x > pOdd.x
+                print("DETECT: pointy-top (row-offset, R) — \(evenShiftRight ? "even-R (even rows shifted right)" : "odd-R (odd rows shifted right)")")
+            } else {
+                print("DETECT: pointy-top (row-offset, R) — parity check skipped (edge).")
+            }
+            return
+        }
+
+        // FLAT-TOP (row-offset / r):
+        // col step is strongly horizontal, but row step is NOT vertically dominant.
+        if colIsStronglyHorizontal && !rowIsVerticalDominant {
+            // Determine parity: which row is shifted right?
+            let re = (r0 % 2 == 0) ? r0 : r0 - 1  // even row near r0
+            let ro = re + 1
+            if re >= 0, ro < map.numberOfRows {
+                let pEven = map.centerOfTile(atColumn: c0, row: re)
+                let pOdd  = map.centerOfTile(atColumn: c0, row: ro)
+                let evenShiftRight = pEven.x > pOdd.x
+                print("DETECT: flat-top (row-offset, r) — \(evenShiftRight ? "even-r" : "odd-r")")
+            } else {
+                print("DETECT: flat-top (row-offset, r) — parity check skipped (edge).")
+            }
+            return
+        }
+
+        // Otherwise we can't say confidently.
+        print("DETECT: ambiguous → rowYvsX=\(Double(rowYvsX)) colXvsY=\(Double(colXvsY)) — using geometry-based neighbors.")
+    }
+    
+    private func probe(_ c: Int, _ r: Int) {
+        guard isInBounds(c, r) else { return }
+        let p = map.centerOfTile(atColumn: c, row: r)
+        let a = SKShapeNode(circleOfRadius: 6); a.fillColor = .yellow; a.position = p
+        let b = SKShapeNode(circleOfRadius: 5); b.fillColor = .green;  b.position = map.centerOfTile(atColumn: c+1, row: r)
+        let d = SKShapeNode(circleOfRadius: 5); d.fillColor = .blue;   d.position = map.centerOfTile(atColumn: c,   row: r+1)
+        for n in [a,b,d] { n.zPosition = 9_999; map.addChild(n) }
+        print("probe (c,r)=\(c),\(r)  (c+1,r) green  (c,r+1) blue")
+    }
+
+#endif
+}

@@ -2,6 +2,9 @@
 <Workspace
    version = "1.0">
    <FileRef
+      location = "group:apps/SE3/SE3.xcodeproj">
+   </FileRef>
+   <FileRef
       location = "group:apps/SceneEditor2/SceneEditor2.xcodeproj">
    </FileRef>
    <FileRef
@@ -28,6 +31,9 @@
    <Group
       location = "group:docs"
       name = "docs">
+      <FileRef
+         location = "group:duplicate.md">
+      </FileRef>
       <FileRef
          location = "group:hexmap.md">
       </FileRef>
