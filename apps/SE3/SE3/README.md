@@ -1,6 +1,7 @@
 
 # call map
 
+```mermaid
 flowchart LR
   %% Layout
   classDef entry fill:#cfe8ff,stroke:#2b6cb0,color:#000,stroke-width:1px
@@ -49,3 +50,4 @@ flowchart LR
   paintReachable --> evenR
   paintReachable --> oddR
   paintReachable --> inBounds
+```
