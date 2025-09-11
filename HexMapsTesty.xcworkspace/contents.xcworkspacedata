@@ -46,6 +46,9 @@
       <FileRef
          location = "group:urls.md">
       </FileRef>
+      <FileRef
+         location = "group:storyboard.md">
+      </FileRef>
    </Group>
    <Group
       location = "group:art"
