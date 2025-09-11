@@ -15,9 +15,22 @@
 		72DEA6512E72F6D000F3F8B1 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		72DEA6592E73135900F3F8B1 /* Exceptions for "Pan" folder in "Pan" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Notes.md,
+			);
+			target = 72DEA6362E72F47E00F3F8B1 /* Pan */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		72DEA6392E72F47E00F3F8B1 /* Pan */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				72DEA6592E73135900F3F8B1 /* Exceptions for "Pan" folder in "Pan" target */,
+			);
 			path = Pan;
 			sourceTree = "<group>";
 		};
