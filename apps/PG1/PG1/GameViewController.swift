@@ -1,6 +1,6 @@
 //
 //  GameViewController.swift
-//  Pan
+//  PG1
 //
 //  Created by john davis on 9/11/25.
 //

@@ -2,6 +2,9 @@
 <Workspace
    version = "1.0">
    <FileRef
+      location = "group:apps/PG1/PG1.xcodeproj">
+   </FileRef>
+   <FileRef
       location = "group:apps/Pan/Pan.xcodeproj">
    </FileRef>
    <FileRef

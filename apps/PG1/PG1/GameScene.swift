@@ -1,6 +1,6 @@
 //
 //  GameScene.swift
-//  Pan
+//  PG1
 //
 //  Created by john davis on 9/11/25.
 //
@@ -9,6 +9,7 @@ import SpriteKit
 import GameplayKit
 
 class GameScene: SKScene {
+    
     // Reference to the World node from the SKS file
     var worldNode: SKNode!
 
@@ -21,5 +22,4 @@ class GameScene: SKScene {
         //    worldNode.position = CGPoint(x: size.width / 2, y: size.height / 2)
         //}
     }
-    
 }
