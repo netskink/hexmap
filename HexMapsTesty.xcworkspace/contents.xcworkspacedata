@@ -56,68 +56,121 @@
    <Group
       location = "group:art"
       name = "art">
-      <FileRef
-         location = "group:Desert_Hex.png">
-      </FileRef>
-      <FileRef
-         location = "group:Grassland_Hex.png">
-      </FileRef>
-      <FileRef
-         location = "group:bluerect.png">
-      </FileRef>
-      <FileRef
-         location = "group:redbe.png">
-      </FileRef>
-      <FileRef
-         location = "group:redrect.png">
-      </FileRef>
-      <FileRef
-         location = "group:whitebe.png">
-      </FileRef>
-      <FileRef
-         location = "group:mdirt1.png">
-      </FileRef>
-      <FileRef
-         location = "group:mdirt2.png">
-      </FileRef>
-      <FileRef
-         location = "group:mdirt3.png">
-      </FileRef>
-      <FileRef
-         location = "group:mdirt4.png">
-      </FileRef>
-      <FileRef
-         location = "group:mgrass1.png">
-      </FileRef>
-      <FileRef
-         location = "group:mgrass2.png">
-      </FileRef>
-      <FileRef
-         location = "group:mgrass3.png">
-      </FileRef>
-      <FileRef
-         location = "group:mgrass4.png">
-      </FileRef>
-      <FileRef
-         location = "group:mgrass5.png">
-      </FileRef>
-      <FileRef
-         location = "group:mwater1.png">
-      </FileRef>
-      <FileRef
-         location = "group:mwater2.png">
-      </FileRef>
-      <FileRef
-         location = "group:mwater3.png">
-      </FileRef>
-      <FileRef
-         location = "group:mwater4.png">
-      </FileRef>
-      <FileRef
-         location = "group:mwater5.png">
-      </FileRef>
-      <FileRef
-         location = "group:Water_Hex.png">
-      </FileRef>
+      <Group
+         location = "group:flattop"
+         name = "flattop">
+         <FileRef
+            location = "group:grass4.png">
+         </FileRef>
+         <FileRef
+            location = "group:grass1.png">
+         </FileRef>
+         <FileRef
+            location = "group:grass3.png">
+         </FileRef>
+         <FileRef
+            location = "group:grass2.png">
+         </FileRef>
+         <FileRef
+            location = "group:water3.png">
+         </FileRef>
+         <FileRef
+            location = "group:water2.png">
+         </FileRef>
+         <FileRef
+            location = "group:water1.png">
+         </FileRef>
+         <FileRef
+            location = "group:blueUnit.png">
+         </FileRef>
+         <FileRef
+            location = "group:dirt1.png">
+         </FileRef>
+         <FileRef
+            location = "group:dirt2.png">
+         </FileRef>
+         <FileRef
+            location = "group:redbe.png">
+         </FileRef>
+         <FileRef
+            location = "group:dirt3.png">
+         </FileRef>
+         <FileRef
+            location = "group:whitebe.png">
+         </FileRef>
+         <FileRef
+            location = "group:redUnit.png">
+         </FileRef>
+         <FileRef
+            location = "group:dirt4.png">
+         </FileRef>
+      </Group>
+      <Group
+         location = "group:pointytop"
+         name = "pointytop">
+         <FileRef
+            location = "group:mdirt4.png">
+         </FileRef>
+         <FileRef
+            location = "group:mdirt3.png">
+         </FileRef>
+         <FileRef
+            location = "group:mdirt2.png">
+         </FileRef>
+         <FileRef
+            location = "group:mdirt1.png">
+         </FileRef>
+         <FileRef
+            location = "group:Water_Hex.png">
+         </FileRef>
+         <FileRef
+            location = "group:mgrass1.png">
+         </FileRef>
+         <FileRef
+            location = "group:mgrass2.png">
+         </FileRef>
+         <FileRef
+            location = "group:mgrass3.png">
+         </FileRef>
+         <FileRef
+            location = "group:bluerect.png">
+         </FileRef>
+         <FileRef
+            location = "group:mgrass4.png">
+         </FileRef>
+         <FileRef
+            location = "group:mgrass5.png">
+         </FileRef>
+         <FileRef
+            location = "group:Grassland_Hex.png">
+         </FileRef>
+         <FileRef
+            location = "group:mwater2.png">
+         </FileRef>
+         <FileRef
+            location = "group:mwater3.png">
+         </FileRef>
+         <FileRef
+            location = "group:mwater1.png">
+         </FileRef>
+         <FileRef
+            location = "group:redbe.png">
+         </FileRef>
+         <FileRef
+            location = "group:redrect.png">
+         </FileRef>
+         <FileRef
+            location = "group:mwater4.png">
+         </FileRef>
+         <FileRef
+            location = "group:whitebe.png">
+         </FileRef>
+         <FileRef
+            location = "group:mwater5.png">
+         </FileRef>
+         <FileRef
+            location = "group:Desert_Hex.png">
+         </FileRef>
+      </Group>
    </Group>
 </Workspace>

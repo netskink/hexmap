@@ -15,6 +15,9 @@ class GameScene: SKScene {
     // Referenece to the Tile Map Node from the SKS file
     var baseMap: SKTileMapNode!
     
+    var blueUnit: SKSpriteNode!
+    var redUnit : SKSpriteNode!
+    
     // used by touchesBegan to detect taps on blueUnit and potential move tiles.
     var selectedUnit: SKSpriteNode?
     var possibleMoveMarkers: [SKSpriteNode] = []
@@ -30,12 +33,13 @@ class GameScene: SKScene {
         //    worldNode.position = CGPoint(x: size.width / 2, y: size.height / 2)
         //}
         
-        // Example: Add unit to row 3, column 5
-        addUnit(named: "blueUnit", atRow: 7, column: 12)
+        // Example: Add units
+        addUnit(named: "blueUnit", atRow: 7, column: 10)
+        addUnit(named: "redUnit", atRow: 13, column: 13)
     }
     
-    func addUnit(named imageName: String, atRow row: Int, column col: Int) {
-        guard let tileMap = self.baseMap else { return }
+    func addUnit(named imageName: String, atRow row: Int, column col: Int) -> SKNode? {
+        guard let tileMap = self.baseMap else { return nil}
 
         // Convert tile coordinate to position in scene
         let position = tileMap.centerOfTile(atColumn: col, row: row)
@@ -48,6 +52,8 @@ class GameScene: SKScene {
 
         // Add to world node so it pans/zooms with the map
         worldNode.addChild(unit)
+        
+        return unit
     }
     
  
