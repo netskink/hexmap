@@ -99,7 +99,7 @@ class GameScene: SKScene {
         let neighbors = flatTopHexNeighbors(row: here.row, column: here.column, parityIsEvenQ: true)
 
         for (nr, nc) in neighbors {
-            guard map.isValidTile(row: nr, column: nc) else { continue }
+            //guard map.isValidTile(row: nr, column: nc) else { continue }
             // This gives the exact *center point* of the tile in map-local coordinates
             let center = map.centerOfTile(atColumn: nc, row: nr)
 
