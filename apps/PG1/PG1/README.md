@@ -42,3 +42,25 @@ graph TD
   GVC --> M3["handlePan(_: UIPanGestureRecognizer)"]
   GVC --> M4["supportedInterfaceOrientations -> UIInterfaceOrientationMask"]
   GVC --> M5["prefersStatusBarHidden -> Bool"]
+  ```
+  
+  # SKTileMapNode_ext.swift
+  
+  Updates for SKTileMapNode so that it can determine nearest neighbors
+  and BFS search.
+  
+  ## call map
+
+```mermaid
+graph TD
+  File1["SKTileMapNode_ext.swift"]
+  Ext["extension SKTileMapNode"]
+  File1 --> Ext
+  Ext --> F1["center(_:_: ) -> CGPoint"]
+  Ext --> F2["proximityNeighbors(col:row:) -> [(col,row)]"]
+  Ext --> F3["inBounds(col:row:) -> Bool"]
+  Ext --> F4["isWalkable(col:row:) -> Bool"]
+  Ext --> F5["bfsPath(from:to:) -> [(col,row)]?"]
+  Ext --> F6["nextStepToward(start:goal:) -> (col,row)?"]
+  ```
+  
