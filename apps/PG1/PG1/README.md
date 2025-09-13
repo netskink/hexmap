@@ -26,4 +26,19 @@ graph TD
 ```
 
 
+# GameViewController.swift
 
+Mostly unchanged from xcode template.
+
+## call map
+
+```mermaid
+graph TD
+  File1["GameViewController.swift"]
+  GVC["GameViewController : UIViewController"]
+  File1 --> GVC
+  GVC --> M1["viewDidLoad()"]
+  GVC --> M2["handlePinch(_: UIPinchGestureRecognizer)"]
+  GVC --> M3["handlePan(_: UIPanGestureRecognizer)"]
+  GVC --> M4["supportedInterfaceOrientations -> UIInterfaceOrientationMask"]
+  GVC --> M5["prefersStatusBarHidden -> Bool"]

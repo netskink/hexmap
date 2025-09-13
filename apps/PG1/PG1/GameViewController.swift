@@ -43,6 +43,8 @@ class GameViewController: UIViewController {
             view.addGestureRecognizer(panGesture)        }
     }
 
+    /// Supported orientations. On iPhone, everything except upside down.
+    /// On iPad, allow all orientations.
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
         if UIDevice.current.userInterfaceIdiom == .phone {
             return .allButUpsideDown
@@ -51,6 +53,7 @@ class GameViewController: UIViewController {
         }
     }
 
+    /// Hide the status bar for a full-screen game experience.
     override var prefersStatusBarHidden: Bool {
         return true
     }
@@ -75,6 +78,9 @@ class GameViewController: UIViewController {
         }
     }
 
+    /// Pan gesture handler.
+    /// Translates `scene.worldNode` by the touch movement. Note the Y-axis
+    /// is inverted in UIKit view space, so we subtract `translation.y`.
     @objc func handlePan(_ sender: UIPanGestureRecognizer) {
         guard let view = self.view as? SKView,
               let scene = view.scene as? GameScene else { return }
