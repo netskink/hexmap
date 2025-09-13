@@ -64,3 +64,36 @@ graph TD
   Ext --> F6["nextStepToward(start:goal:) -> (col,row)?"]
   ```
   
+  # GameScene.swift
+  
+  ## call map
+
+```mermaid
+graph TD
+  File1["GameScene.swift"]
+  GS["GameScene : SKScene"]
+  File1 --> GS
+  GS --> E1["enum Turn { player, computer }"]
+
+  %% Lifecycle
+  GS --> M1["didMove(to:)"]
+
+  %% Unit / helpers
+  GS --> M2["addUnit(named:atRow:column:) -> SKNode"]
+  GS --> M3["tileIndex(of:) -> (col,row)"]
+  GS --> M4["worldPointForTile(col:row:) -> CGPoint"]
+
+  %% Input & highlights
+  GS --> M5["touchesEnded(_:with:)"]
+  GS --> M6["clearMoveHighlights()"]
+  GS --> M7["showMoveHighlights(from:)"]
+
+  %% Turn flow
+  GS --> M8["enablePlayerInput(_:)"]
+  GS --> M9["endTurn()"]
+  GS --> M10["runComputerTurn()"]
+
+  %% Movement
+  GS --> M11["moveUnit(_:toCol:row:completion:)"]
+  ```
+  
