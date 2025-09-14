@@ -73,9 +73,9 @@ class GameScene: SKScene {
         }()
 
         // Example starting positions (OFFSET indices)
-        addUnit(named: "blueUnit", atRow: 7, column: 10)
-        addUnit(named: "redUnit",  atRow: 13, column: 13)
-
+        addUnit(asset: "infantry",       nodeName: "blueUnit", tint: .blue, atRow: 7,  column: 10)
+        addUnit(asset: "mechanizedinf",  nodeName: "redUnit",  tint: .red,  atRow: 13, column: 13)
+        
         currentTurn = .player
         enablePlayerInput(true)
     }
@@ -88,16 +88,37 @@ class GameScene: SKScene {
     ///   - row: Offset row index in `baseMap`.
     ///   - col: Offset column index in `baseMap`.
     /// - Returns: The created `SKSpriteNode`.
+    /// NEW: Create a tinted unit from an asset, assign a node name,
+    /// and place it on the map. Keeps `blueUnit` / `redUnit` references updated.
     @discardableResult
-    func addUnit(named name: String, atRow row: Int, column col: Int) -> SKNode {
-        let tex = SKTexture(imageNamed: name)
-        let sprite = SKSpriteNode(texture: tex); sprite.name = name
-        // Convert tile center (map space) → world space for placement.
+    func addUnit(asset assetName: String,
+                 nodeName: String,
+                 tint: UIColor,
+                 atRow row: Int,
+                 column col: Int) -> SKSpriteNode {
+        let tex = SKTexture(imageNamed: assetName)
+        let sprite = SKSpriteNode(texture: tex)
+
+        // Keep existing codepaths that rely on node names.
+        sprite.name = nodeName
+
+        // Apply team tint.
+        sprite.color = tint
+        sprite.colorBlendFactor = 0.6 // try 0.6–0.8 if your art already has strong colors
+
+        // Place on tile center (map → world).
         sprite.position = worldNode.convert(baseMap.centerOfTile(atColumn: col, row: row), from: baseMap)
         worldNode.addChild(sprite)
-        if name == "blueUnit" { blueUnit = sprite } else if name == "redUnit" { redUnit = sprite }
+
+        // Preserve your stored references.
+        if nodeName == "blueUnit" {
+            blueUnit = sprite
+        } else if nodeName == "redUnit" {
+            redUnit = sprite
+        }
         return sprite
     }
+
 
     // MARK: - Tile index helpers
 
