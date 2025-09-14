@@ -52,6 +52,9 @@
       <FileRef
          location = "group:storyboard.md">
       </FileRef>
+      <FileRef
+         location = "group:xcode.md">
+      </FileRef>
    </Group>
    <Group
       location = "group:art"

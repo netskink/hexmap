@@ -68,6 +68,17 @@ class GameScene: SKScene {
         guard let map = worldNode.childNode(withName: "BaseMap") as? SKTileMapNode else { fatalError("Missing BaseMap") }
         baseMap = map
 
+        // Draw red box around map area
+        let mapSize = baseMap.mapSize
+        //let frameBox = SKShapeNode(rectOf: mapSize)
+        //frameBox.strokeColor = .green
+        //frameBox.lineWidth = 2
+        //frameBox.zPosition = 9999 // Higher than units and highlights
+        //frameBox.position = .zero // Align to BaseMap center
+        //worldNode.addChild(frameBox)
+        
+        drawFrameBox(mapSize: mapSize, in: self)
+        
         overlayNode = worldNode.childNode(withName: "Overlay") ?? {
             let n = SKNode(); n.name = "Overlay"; n.zPosition = 1000; worldNode.addChild(n); return n
         }()

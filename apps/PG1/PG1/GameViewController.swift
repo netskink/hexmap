@@ -42,7 +42,7 @@ class GameViewController: UIViewController {
             let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
             view.addGestureRecognizer(panGesture)        }
     }
-
+    
     /// Supported orientations. On iPhone, everything except upside down.
     /// On iPad, allow all orientations.
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
@@ -52,7 +52,7 @@ class GameViewController: UIViewController {
             return .all
         }
     }
-
+    
     /// Hide the status bar for a full-screen game experience.
     override var prefersStatusBarHidden: Bool {
         return true
@@ -64,31 +64,127 @@ class GameViewController: UIViewController {
     /// excessive zoom in/out. Uses the recognizer's incremental `scale`
     /// (reset to 1.0 each time) to apply smooth relative zooming.
     @objc func handlePinch(_ sender: UIPinchGestureRecognizer) {
-        guard let view = self.view as? SKView,
-              let scene = view.scene as? GameScene else { return }
-
-        if sender.state == .changed || sender.state == .began {
-            // Compute new target scale from current xScale and the pinch delta.
-            let newScale = scene.worldNode.xScale * sender.scale
-            // Clamp zoom level between 0.5x and 2.0x to keep the map usable.
-            let clampedScale = max(0.5, min(newScale, 2.0))
-            scene.worldNode.setScale(clampedScale)
-            // Reset so future deltas are incremental from the new scale.
-            sender.scale = 1.0
-        }
+        guard let skView = self.view as? SKView,
+              let scene = skView.scene as? GameScene,
+              let baseMap = scene.baseMap else { return }
+        
+        let viewSize = skView.bounds.size
+        let mapSize = baseMap.mapSize
+        
+        let minScaleX = viewSize.width / mapSize.width
+        let minScaleY = viewSize.height / mapSize.height
+        let minScale = max(minScaleX, minScaleY)
+        let maxScale: CGFloat = 2.0
+        
+        let adjustedMinScale = minScale * 0.9 // Allow zoom out slightly, or remove if unwanted
+        
+        let newScale = scene.worldNode.xScale * sender.scale
+        let clampedScale = max(adjustedMinScale, min(newScale, maxScale))
+        
+        scene.worldNode.setScale(clampedScale)
+        sender.scale = 1.0
+        
+        // ✅ Critical to keep map visually centered and within bounds
+        clampWorldNode(scene: scene, viewSize: viewSize)
+        
+        print("New scale: \(newScale), Clamped: \(clampedScale), Min: \(minScale)")
     }
-
+    
+    
     /// Pan gesture handler.
     /// Translates `scene.worldNode` by the touch movement. Note the Y-axis
     /// is inverted in UIKit view space, so we subtract `translation.y`.
     @objc func handlePan(_ sender: UIPanGestureRecognizer) {
-        guard let view = self.view as? SKView,
-              let scene = view.scene as? GameScene else { return }
-
-        let translation = sender.translation(in: view)
-        scene.worldNode.position.x += translation.x
-        scene.worldNode.position.y -= translation.y // Flip Y-axis
-        sender.setTranslation(.zero, in: view)
+        guard let skView = self.view as? SKView,
+              let scene = skView.scene as? GameScene else { return }
+        
+        let translation = sender.translation(in: skView)
+        let converted = CGPoint(x: translation.x / scene.worldNode.xScale,
+                                y: -translation.y / scene.worldNode.yScale)
+        
+        scene.worldNode.position = scene.worldNode.position + converted
+        sender.setTranslation(.zero, in: skView)
+        
+        // ✅ Clamp after panning
+        if scene.baseMap != nil {
+            clampWorldNode(scene: scene, viewSize: skView.bounds.size)
+        }
+        
+        print("Pan translation: \(translation)")
+        print("New worldNode position: \(scene.worldNode.position)")
     }
+    
+//    func clampWorldNode(scene: GameScene, viewSize: CGSize) {
+//        guard let baseMap = scene.baseMap else { return }
+//        
+//        let mapSize = baseMap.mapSize
+//        let scale = scene.worldNode.xScale
+//        
+//        let scaledMapWidth = mapSize.width * scale
+//        let scaledMapHeight = mapSize.height * scale
+//        
+//        let visibleWidth = viewSize.width
+//        let visibleHeight = viewSize.height
+//        
+//        var clampX: CGFloat = 0
+//        var clampY: CGFloat = 0
+//        
+//        if scaledMapWidth > visibleWidth {
+//            clampX = (scaledMapWidth - visibleWidth) / 2
+//        }
+//        
+//        if scaledMapHeight > visibleHeight {
+//            clampY = (scaledMapHeight - visibleHeight) / 2
+//        }
+//        
+//        var newPosition = scene.worldNode.position
+//        newPosition.x = min(max(newPosition.x, -clampX), clampX)
+//        newPosition.y = min(max(newPosition.y, -clampY), clampY)
+//        
+//        // Center if clamping is not needed
+//        if clampX == 0 { newPosition.x = 0 }
+//        if clampY == 0 { newPosition.y = 0 }
+//        
+//        scene.worldNode.position = newPosition
+//        
+//        print("Clamping:")
+//        print("- MapSize: \(mapSize), ViewSize: \(viewSize)")
+//        print("- Scale: \(scale)")
+//        print("- ScaledMap: (\(scaledMapWidth), \(scaledMapHeight))")
+//        print("- ClampX: \(clampX), ClampY: \(clampY)")
+//        print("Clamped position: \(scene.worldNode.position)")
+//    }
+
+    func clampWorldNode(scene: GameScene, viewSize: CGSize) {
+        guard let baseMap = scene.baseMap else { return }
+
+        let mapSize = baseMap.mapSize
+        let scale = scene.worldNode.xScale
+
+        let halfVisibleWidth = viewSize.width / 2 / scale
+        let halfVisibleHeight = viewSize.height / 2 / scale
+
+        let halfMapWidth = mapSize.width / 2
+        let halfMapHeight = mapSize.height / 2
+
+        // Compute the max allowed displacement of the worldNode (from center)
+        // so that we don't scroll beyond map edges
+        let minX = -halfMapWidth + halfVisibleWidth
+        let maxX =  halfMapWidth - halfVisibleWidth
+        let minY = -halfMapHeight + halfVisibleHeight
+        let maxY =  halfMapHeight - halfVisibleHeight
+
+        var pos = scene.worldNode.position
+        pos.x = max(minX, min(pos.x, maxX))
+        pos.y = max(minY, min(pos.y, maxY))
+        scene.worldNode.position = pos
+
+        print("Clamping:")
+        print("- MapSize: \(mapSize), ViewSize: \(viewSize)")
+        print("- Scale: \(scale)")
+        print("- Half Visible: (\(halfVisibleWidth), \(halfVisibleHeight))")
+        print("- WorldNode Position: \(scene.worldNode.position)")
+    }
+    
 
 }
