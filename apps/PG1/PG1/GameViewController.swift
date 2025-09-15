@@ -112,58 +112,77 @@ class GameViewController: UIViewController {
         )
 
         // Move the world node
-        let newWorldPosition = CGPoint(
+        scene.worldNode.position = CGPoint(
             x: scene.worldNode.position.x + adjustedTranslation.x,
             y: scene.worldNode.position.y + adjustedTranslation.y
         )
-        scene.worldNode.position = newWorldPosition
 
-        // Calculate the map frame relative to the scene
-        let baseMapFrameInScene = baseMap.convert(baseMap.calculateAccumulatedFrame(), to: scene)
-
+        // Compute camera viewport size in worldNode space
         let viewSize = skView.bounds.size
-        let scale = scene.worldNode.xScale
-
+        let scale = camera.xScale
         let halfViewWidth = viewSize.width / 2 / scale
         let halfViewHeight = viewSize.height / 2 / scale
-        let verticalBuffer: CGFloat = 10
 
-        // Determine clamping boundaries for worldNode based on baseMap's frame inside scene
-        let minX = -(baseMapFrameInScene.maxX - halfViewWidth)
-        let maxX = -(baseMapFrameInScene.minX - halfViewWidth)
-        let minY = -(baseMapFrameInScene.maxY - halfViewHeight + verticalBuffer)
-        let maxY = -(baseMapFrameInScene.minY - halfViewHeight - verticalBuffer)
+        // Compute the camera's visible rect in worldNode space
+        let visibleRect = CGRect(
+            x: -halfViewWidth - scene.worldNode.position.x,
+            y: -halfViewHeight - scene.worldNode.position.y,
+            width: halfViewWidth * 2,
+            height: halfViewHeight * 2
+        )
 
-        var pos = scene.worldNode.position
+        // Map bounds in worldNode space
+        let mapBounds = baseMap.calculateAccumulatedFrame()
 
-        // Apply edge resistance when dragging
-        if sender.state == .changed {
-            let resistanceFactor: CGFloat = 0.4
+        // Apply tile-size buffer to shrink clampable area
+        let tileBufferWidth: CGFloat = 128 * 1.5
+        let tileBufferHeight: CGFloat = 111 * 1
 
-            if pos.x < minX {
-                pos.x += (minX - pos.x) * resistanceFactor
-            } else if pos.x > maxX {
-                pos.x -= (pos.x - maxX) * resistanceFactor
-            }
+        let mapLeft = mapBounds.minX + tileBufferWidth
+        let mapRight = mapBounds.maxX - tileBufferWidth
+        let mapBottom = mapBounds.minY + tileBufferHeight
+        let mapTop = mapBounds.maxY - tileBufferHeight
 
-            if pos.y < minY {
-                pos.y += (minY - pos.y) * resistanceFactor
-            } else if pos.y > maxY {
-                pos.y -= (pos.y - maxY) * resistanceFactor
-            }
+        var newPosition = scene.worldNode.position
 
-            scene.worldNode.position = pos
+        // Clamp horizontal
+        if visibleRect.minX < mapLeft {
+            newPosition.x = -(mapLeft + halfViewWidth)
+        } else if visibleRect.maxX > mapRight {
+            newPosition.x = -(mapRight - halfViewWidth)
         }
 
-        // Snap back when released
+        // Clamp vertical
+        if visibleRect.minY < mapBottom {
+            newPosition.y = -(mapBottom + halfViewHeight)
+        } else if visibleRect.maxY > mapTop {
+            newPosition.y = -(mapTop - halfViewHeight)
+        }
+
+        // Apply position with or without animation
         if sender.state == .ended || sender.state == .cancelled {
-            pos.x = max(min(pos.x, maxX), minX)
-            pos.y = max(min(pos.y, maxY), minY)
-
-            let snapBack = SKAction.move(to: pos, duration: 0.25)
-            snapBack.timingMode = .easeOut
-            scene.worldNode.run(snapBack)
+            let snap = SKAction.move(to: newPosition, duration: 0.25)
+            snap.timingMode = .easeOut
+            scene.worldNode.run(snap)
+        } else {
+            scene.worldNode.position = newPosition
         }
+
+        // === PAN DEBUG LOGGING ===
+        print("==== PAN DEBUG ====")
+        print("worldNode.position: \(scene.worldNode.position)")
+        print("camera.position: \(camera.position)")
+        print("baseMap.position: \(baseMap.position)")
+        print("baseMap.frame: \(baseMap.frame)")
+
+        let sceneFrameDebug = baseMap.convert(baseMap.frame, to: scene)
+        print("baseMap.frame (converted to scene): \(sceneFrameDebug)")
+
+        let worldFrame = baseMap.convert(baseMap.frame, to: scene.worldNode)
+        print("baseMap.frame (converted to worldNode): \(worldFrame)")
+
+        print("view size (screen points): \(viewSize)")
+        print("====================")
     }
     
 
