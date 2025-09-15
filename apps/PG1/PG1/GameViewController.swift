@@ -73,8 +73,12 @@ class GameViewController: UIViewController {
         
         let minScaleX = viewSize.width / mapSize.width
         let minScaleY = viewSize.height / mapSize.height
-        let minScale = max(minScaleX, minScaleY)
+        
+        // limit zoom to 2/3 of map width
+        let maxVisibleWidth = mapSize.width * (2.0 / 3.0)
+        let minScale = viewSize.width / maxVisibleWidth
         let maxScale: CGFloat = 2.0
+        
         
         let adjustedMinScale = minScale * 0.9 // Allow zoom out slightly, or remove if unwanted
         
