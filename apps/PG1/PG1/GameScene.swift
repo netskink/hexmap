@@ -68,27 +68,30 @@ class GameScene: SKScene {
         guard let map = worldNode.childNode(withName: "BaseMap") as? SKTileMapNode else { fatalError("Missing BaseMap") }
         baseMap = map
 
-        // Draw red box around map area
-        let mapSize = baseMap.mapSize
-        //let frameBox = SKShapeNode(rectOf: mapSize)
-        //frameBox.strokeColor = .green
-        //frameBox.lineWidth = 2
-        //frameBox.zPosition = 9999 // Higher than units and highlights
-        //frameBox.position = .zero // Align to BaseMap center
-        //worldNode.addChild(frameBox)
-        
-        drawFrameBox(mapSize: mapSize, in: self)
+
+        // Find the camera in GameScene.sks
+        if let cameraNode = childNode(withName: "Camera") as? SKCameraNode {
+            self.camera = cameraNode
+        }
+    
         
         overlayNode = worldNode.childNode(withName: "Overlay") ?? {
             let n = SKNode(); n.name = "Overlay"; n.zPosition = 1000; worldNode.addChild(n); return n
         }()
 
+        
+        // Draw a debug red line around the worldNode - a union of all children
+        drawFrameBox(theNode: world, in: self)
+
+        
         // Example starting positions (OFFSET indices)
         addUnit(asset: "infantry",       nodeName: "blueUnit", tint: .blue, atRow: 7,  column: 10)
         addUnit(asset: "mechanizedinf",  nodeName: "redUnit",  tint: .red,  atRow: 13, column: 13)
         
         currentTurn = .player
         enablePlayerInput(true)
+        
+        
     }
 
     // MARK: - Add units
