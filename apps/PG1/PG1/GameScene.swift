@@ -91,7 +91,55 @@ class GameScene: SKScene {
         currentTurn = .player
         enablePlayerInput(true)
         
+        // Create a green dot at (10,10) in GameScene coordinates
+        let dot1 = SKShapeNode(circleOfRadius: 5)  // radius = 5 points
+        dot1.fillColor = .green
+        dot1.strokeColor = .clear
+        dot1.position = CGPoint(x: 10, y: 10)  // scene coordinates
+        dot1.zPosition = 10_000 // make sure it stays visible
+        // Create a green dot at (10,10) in GameScene coordinates
+        let dot2 = SKShapeNode(circleOfRadius: 5)  // radius = 5 points
+        dot2.fillColor = .blue
+        dot2.strokeColor = .clear
+        dot2.position = CGPoint(x: 100, y: 100)  // scene coordinates
+        dot2.zPosition = 10_000 // make sure it stays visible
+
+        addChild(dot1)
+        addChild(dot2)
+
         
+        // Create a yellow dot at (10,10) in Camera coordinates
+        let dot3 = SKShapeNode(circleOfRadius: 5)  // radius = 5 points
+        dot3.fillColor = .yellow
+        dot3.strokeColor = .black
+        dot3.position = CGPoint(x: 5, y: 5)  // scene coordinates
+        dot3.zPosition = 10_000 // make sure it stays visible
+        // Create a yellow dot at (10,10) in Camera coordinates
+        let dot4 = SKShapeNode(circleOfRadius: 5)  // radius = 5 points
+        dot4.fillColor = .red
+        dot4.strokeColor = .black
+        dot4.position = CGPoint(x: 15, y: 15)  // scene coordinates
+        dot4.zPosition = 10_000 // make sure it stays visible
+
+        self.camera?.addChild(dot3)
+        self.camera?.addChild(dot4)
+        
+        // 1. Find the visual center of tile (col=0,row=0) in map coordinates
+        let mapPoint = baseMap.centerOfTile(atColumn: 0, row: 0)
+
+        // 2. Convert from baseMap’s local coordinates → worldNode’s coordinates
+        let worldPoint = worldNode.convert(mapPoint, from: baseMap)
+
+        // 3. Create a dot and place it at that point
+        let tileDot = SKShapeNode(circleOfRadius: 6)
+        tileDot.fillColor = .magenta
+        tileDot.strokeColor = .black
+        tileDot.lineWidth = 1.0
+        tileDot.position = worldPoint
+        tileDot.zPosition = 5000
+
+        worldNode.addChild(tileDot)
+
     }
 
     // MARK: - Add units

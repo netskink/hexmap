@@ -1,190 +1,181 @@
-//
-//  GameViewController.swift
-//  PG1
-//
-//  Created by john davis on 9/11/25.
-//
-
 import UIKit
 import SpriteKit
 import GameplayKit
 
 class GameViewController: UIViewController {
     
+    private var screenDot1: UIView?
+    private var screenDot2: UIView?
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Called after the view controller's view is loaded into memory.
-        // This is a good place to configure the SKView and present the initial scene.
         
-        if let view = self.view as! SKView? {
-            // Load the SKScene from 'GameScene.sks'
-            if let scene = SKScene(fileNamed: "GameScene") {
-                // Set the scale mode to scale to fit the window
+
+        if let view = self.view as? SKView {
+            if let scene = SKScene(fileNamed: "GameScene") as? GameScene {
                 scene.scaleMode = .aspectFill
-                // Present the scene
                 view.presentScene(scene)
+
+                // Add gesture recognizers
+                let panRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
+                view.addGestureRecognizer(panRecognizer)
+
+                let pinchRecognizer = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+                view.addGestureRecognizer(pinchRecognizer)
             }
-            
-            // Rendering optimization: allows SpriteKit to reorder siblings
-            // for performance as long as zPosition is respected.
-            view.ignoresSiblingOrder = true
-            
-            // Debug overlays (OK for development; disable for release).
-            view.showsFPS = true
-            view.showsNodeCount = true
-            
-            // --- Gesture recognizers ---
-            // Pinch to zoom the GameScene's `worldNode`.
-            let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
-            view.addGestureRecognizer(pinchGesture)
-            
-            // Pan to move the GameScene's `worldNode`.
-            let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-            view.addGestureRecognizer(panGesture)        }
-    }
-    
-    /// Supported orientations. On iPhone, everything except upside down.
-    /// On iPad, allow all orientations.
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
-        if UIDevice.current.userInterfaceIdiom == .phone {
-            return .allButUpsideDown
-        } else {
-            return .all
         }
     }
     
-    /// Hide the status bar for a full-screen game experience.
-    override var prefersStatusBarHidden: Bool {
-        return true
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        addScreenDebugDot()
+        positionScreenDebugDot()
     }
-    
-    
-    /// Pinch gesture handler.
-    /// Adjusts the scale of `scene.worldNode` with clamping to prevent
-    @objc func handlePinch(_ sender: UIPinchGestureRecognizer) {
-        guard let skView = self.view as? SKView,
-              let scene = skView.scene as? GameScene,
-              let baseMap = scene.baseMap,
-              let camera = scene.camera else { return }
 
-        let viewSize = skView.bounds.size
-        let mapSize = baseMap.mapSize
-
-        // Clamp minimum scale so the camera shows no more than 2/3 of map width
-        let maxVisibleWidth = mapSize.width * (2.0 / 3.0)
-        let minScale = viewSize.width / maxVisibleWidth
-
-        // Optional: clamp max zoom-in
-        let maxScale: CGFloat = 2.0
-
-        // Apply relative zoom
-        if sender.state == .changed || sender.state == .ended {
-            let scale = 1 / sender.scale
-            let newScale = camera.xScale * scale
-            let clampedScale = min(max(newScale, minScale), maxScale)
-            camera.setScale(clampedScale)
-            sender.scale = 1.0
-        }
-        
-        // ✅ Critical to keep map visually centered and within bounds
-        //clampWorldNode(scene: scene, viewSize: viewSize)
-        
-        //print("New scale: \(newScale), Clamped: \(clampedScale), Min: \(minScale)")
-
-    }
-    
-    /// Pan gesture handler.
-    /// Translates `scene.worldNode` by the touch movement. Note the Y-axis
-    /// is inverted in UIKit view space, so we subtract `translation.y`.
     @objc func handlePan(_ sender: UIPanGestureRecognizer) {
         guard let skView = self.view as? SKView,
-              let scene = skView.scene as? GameScene,
-              let baseMap = scene.baseMap,
-              let camera = scene.camera else { return }
+              let scene = skView.scene as? GameScene else { return }
 
         let translation = sender.translation(in: skView)
         sender.setTranslation(.zero, in: skView)
 
-        // Adjust for zoom and UIKit/SpriteKit Y-axis flip
-        let adjustedTranslation = CGPoint(
-            x: translation.x / scene.worldNode.xScale,
-            y: -translation.y / scene.worldNode.yScale
-        )
+        scene.worldNode.position.x += translation.x
+        scene.worldNode.position.y -= translation.y
 
-        // Move the world node
-        scene.worldNode.position = CGPoint(
-            x: scene.worldNode.position.x + adjustedTranslation.x,
-            y: scene.worldNode.position.y + adjustedTranslation.y
-        )
+        if sender.state == .ended || sender.state == .cancelled {
+            let snap = SKAction.move(to: scene.worldNode.position, duration: 0.25)
+            snap.timingMode = .easeOut
+            scene.worldNode.run(snap)
+        } else {
+            clampWorldNode(scene: scene)
+        }
+    }
 
-        // Compute camera viewport size in worldNode space
+    @objc func handlePinch(_ sender: UIPinchGestureRecognizer) {
+        guard let skView = self.view as? SKView,
+              let scene = skView.scene as? GameScene,
+              let camera = scene.camera else { return }
+
+        if sender.state == .changed {
+            let newScale = camera.xScale / sender.scale
+            let clampedScale = max(0.2, min(newScale, 2.0))
+            camera.setScale(clampedScale)
+            sender.scale = 1.0
+            clampWorldNode(scene: scene)
+        }
+    }
+
+    private func positionScreenDebugDot() {
+        guard let skView = self.view as? SKView,
+              let dot1 = self.screenDot1,
+              let dot2 = self.screenDot2 else { return }
+
+        // Respect safe area so it isn't hidden under a nav bar/notch
+        let insets = skView.safeAreaInsets
+        let origin1 = CGPoint(x: insets.left + 10, y: insets.top + 10)
+        dot1.frame.origin = origin1
+        let origin2 = CGPoint(x: insets.left + 100, y: insets.top + 100)
+        dot2.frame.origin = origin2
+
+        // Make sure it's above SpriteKit's content and any gesture overlays
+        skView.bringSubviewToFront(dot1)
+        skView.bringSubviewToFront(dot2)
+    }
+
+    func clampWorldNode(scene: GameScene) {
+        guard let skView = self.view as? SKView,
+              let baseMap = scene.baseMap,
+              let camera = scene.camera else { return }
+
         let viewSize = skView.bounds.size
         let scale = camera.xScale
-        let halfViewWidth = viewSize.width / 2 / scale
-        let halfViewHeight = viewSize.height / 2 / scale
+        let halfViewWidth = viewSize.width / CGFloat(2.0) / scale
+        let halfViewHeight = viewSize.height / CGFloat(2.0) / scale
 
-        // Compute the camera's visible rect in worldNode space
-        let visibleRect = CGRect(
-            x: -halfViewWidth - scene.worldNode.position.x,
-            y: -halfViewHeight - scene.worldNode.position.y,
-            width: halfViewWidth * 2,
-            height: halfViewHeight * 2
-        )
+        let tileBufferWidth: CGFloat = CGFloat(128) * 1.5
+        let tileBufferHeight: CGFloat = CGFloat(111) * 1.0
 
-        // Map bounds in worldNode space
         let mapBounds = baseMap.calculateAccumulatedFrame()
-
-        // Apply tile-size buffer to shrink clampable area
-        let tileBufferWidth: CGFloat = 128 * 1.5
-        let tileBufferHeight: CGFloat = 111 * 1
-
         let mapLeft = mapBounds.minX + tileBufferWidth
         let mapRight = mapBounds.maxX - tileBufferWidth
         let mapBottom = mapBounds.minY + tileBufferHeight
         let mapTop = mapBounds.maxY - tileBufferHeight
 
+        // Calculate new camera viewport edges in worldNode coordinates
         var newPosition = scene.worldNode.position
 
-        // Clamp horizontal
-        if visibleRect.minX < mapLeft {
+        let visibleLeft = -halfViewWidth - newPosition.x
+        let visibleRight = halfViewWidth - newPosition.x
+        let visibleBottom = -halfViewHeight - newPosition.y
+        let visibleTop = halfViewHeight - newPosition.y
+
+        if visibleLeft < mapLeft {
             newPosition.x = -(mapLeft + halfViewWidth)
-        } else if visibleRect.maxX > mapRight {
+        } else if visibleRight > mapRight {
             newPosition.x = -(mapRight - halfViewWidth)
         }
 
-        // Clamp vertical
-        if visibleRect.minY < mapBottom {
+        if visibleBottom < mapBottom {
             newPosition.y = -(mapBottom + halfViewHeight)
-        } else if visibleRect.maxY > mapTop {
+        } else if visibleTop > mapTop {
             newPosition.y = -(mapTop - halfViewHeight)
         }
 
-        // Apply position with or without animation
-        if sender.state == .ended || sender.state == .cancelled {
-            let snap = SKAction.move(to: newPosition, duration: 0.25)
-            snap.timingMode = .easeOut
-            scene.worldNode.run(snap)
-        } else {
-            scene.worldNode.position = newPosition
-        }
-
-        // === PAN DEBUG LOGGING ===
-        print("==== PAN DEBUG ====")
-        print("worldNode.position: \(scene.worldNode.position)")
-        print("camera.position: \(camera.position)")
-        print("baseMap.position: \(baseMap.position)")
-        print("baseMap.frame: \(baseMap.frame)")
-
-        let sceneFrameDebug = baseMap.convert(baseMap.frame, to: scene)
-        print("baseMap.frame (converted to scene): \(sceneFrameDebug)")
-
-        let worldFrame = baseMap.convert(baseMap.frame, to: scene.worldNode)
-        print("baseMap.frame (converted to worldNode): \(worldFrame)")
-
-        print("view size (screen points): \(viewSize)")
-        print("====================")
+        scene.worldNode.position = newPosition
     }
     
+    private func addScreenDebugDot() {
+        guard let skView = self.view as? SKView else { return }
 
+        // If already added, just re-position and return
+        if let existing1 = self.screenDot1, skView.subviews.contains(existing1) {
+            positionScreenDebugDot()
+            return
+        }
+        if let existing2 = self.screenDot2, skView.subviews.contains(existing2) {
+            positionScreenDebugDot()
+            return
+        }
 
+        let size: CGFloat = 14
+        let dot1 = UIView(frame: CGRect(origin: .zero, size: CGSize(width: size, height: size)))
+        dot1.backgroundColor = .systemGreen
+        dot1.layer.cornerRadius = size / 2
+        dot1.isUserInteractionEnabled = false
+        dot1.layer.borderWidth = 1
+        dot1.layer.borderColor = UIColor.white.withAlphaComponent(0.9).cgColor
+        dot1.layer.shadowColor = UIColor.black.cgColor
+        dot1.layer.shadowOpacity = 0.35
+        dot1.layer.shadowRadius = 2
+        dot1.layer.shadowOffset = CGSize(width: 0, height: 1)
+
+        skView.addSubview(dot1)
+        self.screenDot1 = dot1
+
+        let dot2 = UIView(frame: CGRect(origin: .zero, size: CGSize(width: size, height: size)))
+        dot2.backgroundColor = .systemBlue
+        dot2.layer.cornerRadius = size / 2
+        dot2.isUserInteractionEnabled = false
+        dot2.layer.borderWidth = 1
+        dot2.layer.borderColor = UIColor.white.withAlphaComponent(0.9).cgColor
+        dot2.layer.shadowColor = UIColor.black.cgColor
+        dot2.layer.shadowOpacity = 0.35
+        dot2.layer.shadowRadius = 2
+        dot2.layer.shadowOffset = CGSize(width: 0, height: 1)
+
+        skView.addSubview(dot2)
+        self.screenDot2 = dot2
+
+        positionScreenDebugDot()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        positionScreenDebugDot()
+    }
+
+    override func viewSafeAreaInsetsDidChange() {
+        super.viewSafeAreaInsetsDidChange()
+        positionScreenDebugDot()
+    }
 }
