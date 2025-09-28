@@ -6,6 +6,12 @@
 import SpriteKit
 import GameplayKit
 
+
+extension Notification.Name {
+    static let worldCornersDidUpdate = Notification.Name("WorldCornersDidUpdate")
+}
+
+
 /// Side currently taking a turn.
 enum Turn { case player, computer }
 
@@ -95,11 +101,11 @@ class GameScene: SKScene {
         let dot1 = SKShapeNode(circleOfRadius: 5)  // radius = 5 points
         dot1.fillColor = .green
         dot1.strokeColor = .clear
-        dot1.position = CGPoint(x: 10, y: 10)  // scene coordinates
+        dot1.position = CGPoint(x: 1, y: 1)  // scene coordinates
         dot1.zPosition = 10_000 // make sure it stays visible
         // Create a green dot at (10,10) in GameScene coordinates
         let dot2 = SKShapeNode(circleOfRadius: 5)  // radius = 5 points
-        dot2.fillColor = .blue
+        dot2.fillColor = .systemGreen
         dot2.strokeColor = .clear
         dot2.position = CGPoint(x: 100, y: 100)  // scene coordinates
         dot2.zPosition = 10_000 // make sure it stays visible
@@ -110,15 +116,15 @@ class GameScene: SKScene {
         
         // Create a yellow dot at (10,10) in Camera coordinates
         let dot3 = SKShapeNode(circleOfRadius: 5)  // radius = 5 points
-        dot3.fillColor = .yellow
+        dot3.fillColor = .red
         dot3.strokeColor = .black
-        dot3.position = CGPoint(x: 5, y: 5)  // scene coordinates
+        dot3.position = CGPoint(x: 50, y: 50)  // scene coordinates
         dot3.zPosition = 10_000 // make sure it stays visible
         // Create a yellow dot at (10,10) in Camera coordinates
         let dot4 = SKShapeNode(circleOfRadius: 5)  // radius = 5 points
-        dot4.fillColor = .red
+        dot4.fillColor = .systemPurple
         dot4.strokeColor = .black
-        dot4.position = CGPoint(x: 15, y: 15)  // scene coordinates
+        dot4.position = CGPoint(x: 150, y: 150)  // scene coordinates
         dot4.zPosition = 10_000 // make sure it stays visible
 
         self.camera?.addChild(dot3)
@@ -132,16 +138,45 @@ class GameScene: SKScene {
 
         // 3. Create a dot and place it at that point
         let tileDot = SKShapeNode(circleOfRadius: 6)
-        tileDot.fillColor = .magenta
+        tileDot.fillColor = .blue
         tileDot.strokeColor = .black
         tileDot.lineWidth = 1.0
         tileDot.position = worldPoint
         tileDot.zPosition = 5000
 
         worldNode.addChild(tileDot)
+        
+        if let sceneCorners = worldNode.accumulatedCorners(in: self) {
+            print("Scene-space corners:",
+                  "TL:", sceneCorners.tl,
+                  "TR:", sceneCorners.tr,
+                  "BR:", sceneCorners.br,
+                  "BL:", sceneCorners.bl)
+        }
 
     }
 
+    
+    // MARK: - Scene update cycle
+
+    /// Called after all actions have been evaluated in the scene.
+    /// Prints the worldNode's corners in scene space after each update cycle.
+    override func didEvaluateActions() {
+        super.didEvaluateActions()
+        if let corners = worldNode?.accumulatedCorners(in: self) {
+            NotificationCenter.default.post(name: .worldCornersDidUpdate,
+                                            object: self,
+                                            userInfo: [
+                                                "tl": NSValue(cgPoint: corners.tl),
+                                                "tr": NSValue(cgPoint: corners.tr),
+                                                "br": NSValue(cgPoint: corners.br),
+                                                "bl": NSValue(cgPoint: corners.bl)
+                                            ])
+        }
+    }
+
+    
+    
     // MARK: - Add units
 
     /// Creates a sprite from `Assets.xcassets` and places it on the map.

@@ -55,6 +55,15 @@
       <FileRef
          location = "group:xcode.md">
       </FileRef>
+      <FileRef
+         location = "group:coordinates.png">
+      </FileRef>
+      <FileRef
+         location = "group:CoordinateSystemsFlowinGameViewController.swift.png">
+      </FileRef>
+      <FileRef
+         location = "group:TileMapwithZoomedInCameraViewport.png">
+      </FileRef>
    </Group>
    <Group
       location = "group:art"

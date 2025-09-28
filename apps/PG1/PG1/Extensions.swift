@@ -53,3 +53,42 @@ func drawFrameBox(theNode: SKNode, in scene: GameScene, color: SKColor = .red) {
     box.zPosition = 9999
     scene.worldNode.addChild(box)
 }
+
+
+
+
+extension SKNode {
+    struct Corners {
+        let tl: CGPoint
+        let tr: CGPoint
+        let br: CGPoint
+        let bl: CGPoint
+    }
+
+    /// Corners of this node's accumulated frame (union of self + descendants).
+    /// - Parameter in: The target coordinate space you want the points in.
+    ///                 If nil, returns in `parent` space (SpriteKit’s default).
+    /// - Returns: Top-left, top-right, bottom-right, bottom-left points.
+    func accumulatedCorners(in targetSpace: SKNode? = nil) -> Corners? {
+        guard let parent = self.parent else { return nil }
+
+        // Rect is in *parent* coordinates per Apple docs.
+        let rect = self.calculateAccumulatedFrame()
+
+        var tl = CGPoint(x: rect.minX, y: rect.maxY)
+        var tr = CGPoint(x: rect.maxX, y: rect.maxY)
+        var br = CGPoint(x: rect.maxX, y: rect.minY)
+        var bl = CGPoint(x: rect.minX, y: rect.minY)
+
+        // Convert to requested space if needed
+        let dst = targetSpace ?? parent
+        if dst !== parent {
+            tl = parent.convert(tl, to: dst)
+            tr = parent.convert(tr, to: dst)
+            br = parent.convert(br, to: dst)
+            bl = parent.convert(bl, to: dst)
+        }
+
+        return Corners(tl: tl, tr: tr, br: br, bl: bl)
+    }
+}
