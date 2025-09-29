@@ -13,6 +13,52 @@ class GameViewController: UIViewController {
     private var cornerTR: UILabel?
     private var cornerBR: UILabel?
     private var cornerBL: UILabel?
+    private var cameraWHLabel: UILabel?
+    /// Create/update a HUD label that shows the camera viewport size in scene units.
+    private func updateCameraWHLabel() {
+        guard let skView = self.view as? SKView,
+              let scene = skView.scene as? GameScene,
+              let cam = scene.camera else { return }
+
+        // Create label if missing
+        if cameraWHLabel == nil {
+            let l = UILabel()
+            l.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+            l.textColor = .white
+            l.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+            l.textAlignment = .center
+            l.layer.cornerRadius = 6
+            l.layer.masksToBounds = true
+            l.isUserInteractionEnabled = false
+            (self.view as? SKView)?.addSubview(l)
+            cameraWHLabel = l
+        }
+
+        // Compute camera viewport size in SCENE units (resizeFill => 1pt == 1 scene unit pre-camera)
+        let viewSize = skView.bounds.size
+        let camW = viewSize.width  / cam.xScale
+        let camH = viewSize.height / cam.yScale
+
+        // Update text
+        cameraWHLabel?.text = String(format: "camera %.0f×%.0f (scene units)", camW, camH)
+
+        // Size label and position it at the top-center inside the safe area
+        cameraWHLabel?.sizeToFit()
+        let padX: CGFloat = 12
+        let padY: CGFloat = 6
+        if var f = cameraWHLabel?.frame {
+            f.size.width  += padX
+            f.size.height += padY
+            let inset = skView.safeAreaInsets
+            let x = (viewSize.width - f.size.width) * 0.5
+            let y = inset.top + 8
+            f.origin = CGPoint(x: x, y: y)
+            cameraWHLabel?.frame = f
+        }
+
+        // Keep above SpriteKit content
+        if let l = cameraWHLabel { skView.bringSubviewToFront(l) }
+    }
 
     
     private var sceneTL: CGPoint = .zero
@@ -26,7 +72,7 @@ class GameViewController: UIViewController {
 
         if let view = self.view as? SKView {
             if let scene = SKScene(fileNamed: "GameScene") as? GameScene {
-                scene.scaleMode = .aspectFill
+                scene.scaleMode = .resizeFill
                 view.presentScene(scene)
 
                 // Add gesture recognizers
@@ -84,23 +130,106 @@ class GameViewController: UIViewController {
         return CGSize(width: maxWidth + padding.width, height: height)
     }
     
-    private func makeCornerLabelText(viewLine: String, sceneLine: String, sceneViewLine: String) -> NSAttributedString {
-        let fullText = viewLine + "\n" + sceneLine + "\n" + sceneViewLine
+    private func makeCornerLabelText(viewLine: String, sceneLine: String, sceneViewLine: String, camViewLine: String, camWorldLine: String) -> NSAttributedString {
+        let fullText = viewLine + "\n" + sceneLine + "\n" + sceneViewLine + "\n" + camViewLine + "\n" + camWorldLine
         let attr = NSMutableAttributedString(string: fullText)
         let font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
-        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.white],
-                           range: NSRange(location: 0, length: (viewLine as NSString).length))
-        let sceneRange = NSRange(location: (viewLine as NSString).length + 1,
-                                 length: (sceneLine as NSString).length)
-        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.systemTeal],
-                           range: sceneRange)
-        let sceneViewRange = NSRange(location: (viewLine as NSString).length + 1 + (sceneLine as NSString).length + 1,
-                                     length: (sceneViewLine as NSString).length)
-        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.white],
-                           range: sceneViewRange)
+
+        // line 1 (view) - white
+        let viewRange = NSRange(location: 0, length: (viewLine as NSString).length)
+        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.white], range: viewRange)
+
+        // line 2 (scene) - teal
+        let sceneRange = NSRange(location: viewRange.location + viewRange.length + 1, length: (sceneLine as NSString).length)
+        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.systemTeal], range: sceneRange)
+
+        // line 3 (scene→view) - white
+        let sceneViewRange = NSRange(location: sceneRange.location + sceneRange.length + 1, length: (sceneViewLine as NSString).length)
+        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.white], range: sceneViewRange)
+
+        // line 4 (cam→view) - red
+        let camViewRange = NSRange(location: sceneViewRange.location + sceneViewRange.length + 1, length: (camViewLine as NSString).length)
+        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.systemRed], range: camViewRange)
+
+        // line 5 (cam→world) - orange
+        let camWorldRange = NSRange(location: camViewRange.location + camViewRange.length + 1, length: (camWorldLine as NSString).length)
+        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.systemOrange], range: camWorldRange)
+
         return attr
+    }
+    
+    /// Desired min/max viewport sizes (scene units) inferred from the current screen size.
+    /// Interpolates between two reference devices (iPhone 14 and iPhone 16 Pro).
+    private func targetViewportRanges(for viewSize: CGSize) -> (minW: CGFloat, minH: CGFloat, maxW: CGFloat, maxH: CGFloat) {
+        // Reference A: iPhone 14 (≈ 390×844 points, portrait)
+        let refW1: CGFloat = 390, refH1: CGFloat = 844
+        let minW1: CGFloat = 192, minH1: CGFloat = 89    // most zoomed-in (smallest viewport)
+        let maxW1: CGFloat = 923, maxH1: CGFloat = 426   // most zoomed-out (largest viewport)
+
+        // Reference B: iPhone 16 Pro (≈ 402×874 points, portrait)
+        let refW2: CGFloat = 402, refH2: CGFloat = 874
+        let minW2: CGFloat = 206, minH2: CGFloat = 95
+        let maxW2: CGFloat = 918, maxH2: CGFloat = 422
+
+        func lerp(_ a: CGFloat, _ b: CGFloat, t: CGFloat) -> CGFloat { a + (b - a) * t }
+
+        // Interpolation factors, clamped to [0,1] to avoid wild extrapolation
+        let tW = max(0, min(1, (viewSize.width  - refW1) / (refW2 - refW1)))
+        let tH = max(0, min(1, (viewSize.height - refH1) / (refH2 - refH1)))
+
+        // Width-driven targets vary mostly with width; height-driven with height
+        let minW = lerp(minW1, minW2, t: tW)
+        let maxW = lerp(maxW1, maxW2, t: tW)
+        let minH = lerp(minH1, minH2, t: tH)
+        let maxH = lerp(maxH1, maxH2, t: tH)
+
+        return (minW, minH, maxW, maxH)
+    }
+    
+    
+    /// Draw/refresh a red rectangle that matches the camera's visible area.
+    /// The rectangle is added as a child of the camera so it follows pan automatically.
+    private func updateCameraOverlay() {
+        guard let skView = self.view as? SKView,
+              let scene = skView.scene as? GameScene,
+              let cam = scene.camera else { return }
+
+        // With .resizeFill and scene.size matched to the SKView, 1 view point == 1 scene unit (pre-camera).
+        let viewSize = skView.bounds.size
+        let halfW = (viewSize.width  * 0.5) / cam.xScale
+        let halfH = (viewSize.height * 0.5) / cam.yScale
+        let rect = CGRect(x: -halfW, y: -halfH, width: halfW * 2, height: halfH * 2)
+
+        // Reuse or create overlay node under the camera
+        let name = "CameraOverlay"
+        let overlay: SKShapeNode
+        if let existing = cam.childNode(withName: name) as? SKShapeNode {
+            overlay = existing
+        } else {
+            overlay = SKShapeNode()
+            overlay.name = name
+            overlay.fillColor = .clear
+            overlay.strokeColor = .systemRed
+            overlay.lineJoin = .miter
+            overlay.zPosition = 100_000
+            cam.addChild(overlay)
+        }
+
+        // Update path and keep ~1pt line width on screen regardless of zoom
+        let path = CGMutablePath()
+        path.addRect(rect)
+        overlay.path = path
+        overlay.lineWidth = max(1.0 / cam.xScale, 0.5)
+    }
+    /// Ensure the SpriteKit scene's size matches the SKView's current bounds when using .resizeFill.
+    private func ensureSceneMatchesView() {
+        guard let skView = self.view as? SKView,
+              let scene = skView.scene else { return }
+        if scene.scaleMode == .resizeFill {
+            scene.size = skView.bounds.size
+        }
     }
     
     @objc private func handleWorldCorners(_ note: Notification) {
@@ -130,8 +259,6 @@ class GameViewController: UIViewController {
         let w = size.width
         let h = size.height
 
-
-        
         // Convert the latest scene-corner points to UIKit view coordinates (for third line)
         var tlSceneInView = CGPoint.zero
         var trSceneInView = CGPoint.zero
@@ -143,29 +270,65 @@ class GameViewController: UIViewController {
             brSceneInView = scene.convertPoint(toView: sceneBR)
             blSceneInView = scene.convertPoint(toView: sceneBL)
         }
-        
-        
-        // Three-line text per corner: line1=view, line2=scene (world bounds), line3=scene→view
+
+        // Camera viewport corners in scene -> then to view coords (should match the view corners)
+        var tlCamInView = CGPoint.zero
+        var trCamInView = CGPoint.zero
+        var brCamInView = CGPoint.zero
+        var blCamInView = CGPoint.zero
+        // Camera viewport corners in scene coordinates
+        var tlCamWorld = CGPoint.zero
+        var trCamWorld = CGPoint.zero
+        var brCamWorld = CGPoint.zero
+        var blCamWorld = CGPoint.zero
+        if let scene = (self.view as? SKView)?.scene as? GameScene, let cam = scene.camera {
+            let halfW = (w * 0.5) / cam.xScale
+            let halfH = (h * 0.5) / cam.yScale
+            let tlCamScene = CGPoint(x: cam.position.x - halfW, y: cam.position.y + halfH)
+            let trCamScene = CGPoint(x: cam.position.x + halfW, y: cam.position.y + halfH)
+            let brCamScene = CGPoint(x: cam.position.x + halfW, y: cam.position.y - halfH)
+            let blCamScene = CGPoint(x: cam.position.x - halfW, y: cam.position.y - halfH)
+            // Convert to worldNode coordinates
+            if let world = scene.worldNode {
+                tlCamWorld = world.convert(tlCamScene, from: scene)
+                trCamWorld = world.convert(trCamScene, from: scene)
+                brCamWorld = world.convert(brCamScene, from: scene)
+                blCamWorld = world.convert(blCamScene, from: scene)
+            }
+            tlCamInView = scene.convertPoint(toView: tlCamScene)
+            trCamInView = scene.convertPoint(toView: trCamScene)
+            brCamInView = scene.convertPoint(toView: brCamScene)
+            blCamInView = scene.convertPoint(toView: blCamScene)
+        }
+
         tl.attributedText = makeCornerLabelText(
             viewLine: String(format: "TL (0, 0) view"),
             sceneLine: String(format: "(%.1f, %.1f) scene", sceneTL.x, sceneTL.y),
-            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", tlSceneInView.x, tlSceneInView.y))
+            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", tlSceneInView.x, tlSceneInView.y),
+            camViewLine: String(format: "(%.1f, %.1f) cam→view", tlCamInView.x, tlCamInView.y),
+            camWorldLine: String(format: "(%.1f, %.1f) cam→world", tlCamWorld.x, tlCamWorld.y))
+
         tr.attributedText = makeCornerLabelText(
             viewLine: String(format: "TR (%.0f, 0) view", w),
             sceneLine: String(format: "(%.1f, %.1f) scene", sceneTR.x, sceneTR.y),
-            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", trSceneInView.x, trSceneInView.y))
+            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", trSceneInView.x, trSceneInView.y),
+            camViewLine: String(format: "(%.1f, %.1f) cam→view", trCamInView.x, trCamInView.y),
+            camWorldLine: String(format: "(%.1f, %.1f) cam→world", trCamWorld.x, trCamWorld.y))
 
         br.attributedText = makeCornerLabelText(
             viewLine: String(format: "BR (%.0f, %.0f) view", w, h),
             sceneLine: String(format: "(%.1f, %.1f) scene", sceneBR.x, sceneBR.y),
-            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", brSceneInView.x, brSceneInView.y))
+            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", brSceneInView.x, brSceneInView.y),
+            camViewLine: String(format: "(%.1f, %.1f) cam→view", brCamInView.x, brCamInView.y),
+            camWorldLine: String(format: "(%.1f, %.1f) cam→world", brCamWorld.x, brCamWorld.y))
 
         bl.attributedText = makeCornerLabelText(
             viewLine: String(format: "BL (0, %.0f) view", h),
             sceneLine: String(format: "(%.1f, %.1f) scene", sceneBL.x, sceneBL.y),
-            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", blSceneInView.x, blSceneInView.y))
-        
-        
+            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", blSceneInView.x, blSceneInView.y),
+            camViewLine: String(format: "(%.1f, %.1f) cam→view", blCamInView.x, blCamInView.y),
+            camWorldLine: String(format: "(%.1f, %.1f) cam→world", blCamWorld.x, blCamWorld.y))
+
         // Resize to fit the longest line exactly (no wrapping)
         tl.frame.size = sizeForMultilineLabel(text: tl.attributedText?.string ?? "", font: tl.font)
         tr.frame.size = sizeForMultilineLabel(text: tr.attributedText?.string ?? "", font: tr.font)
@@ -197,6 +360,18 @@ class GameViewController: UIViewController {
         setupCornerHUD()
         addScreenDebugDot()
         positionScreenDebugDot()
+        ensureSceneMatchesView()
+        updateCameraOverlay()
+        updateCameraWHLabel()
+        
+        if let skView = self.view as? SKView,
+           let scene = skView.scene as? GameScene,
+           let camera = scene.camera {
+            let (minScaleOut, maxScaleIn) = computeScaleBounds(for: skView, scene: scene)
+            camera.setScale(max(minScaleOut, min(camera.xScale, maxScaleIn)))
+            updateCameraOverlay()
+            updateCameraWHLabel()
+        }
         
         NotificationCenter.default.addObserver(self,
                 selector: #selector(handleWorldCorners(_:)),
@@ -212,14 +387,19 @@ class GameViewController: UIViewController {
     
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        ensureSceneMatchesView()
         updateCornerHUD()
         positionScreenDebugDot()
+        updateCameraOverlay()
+        updateCameraWHLabel()
     }
 
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         updateCornerHUD()
         positionScreenDebugDot()
+        updateCameraOverlay()
+        updateCameraWHLabel()
     }
     
 
@@ -233,6 +413,8 @@ class GameViewController: UIViewController {
 
         scene.worldNode.position.x += translation.x
         scene.worldNode.position.y -= translation.y
+        updateCameraOverlay()
+        updateCameraWHLabel()
 
         if sender.state == .ended || sender.state == .cancelled {
             let snap = SKAction.move(to: scene.worldNode.position, duration: 0.25)
@@ -249,12 +431,43 @@ class GameViewController: UIViewController {
               let camera = scene.camera else { return }
 
         if sender.state == .changed {
-            let newScale = camera.xScale / sender.scale
-            let clampedScale = max(0.2, min(newScale, 2.0))
+            // Proposed new scale from the gesture
+            let proposedScale = camera.xScale / sender.scale
+
+            // Dynamic bounds: zoom-out fits full map height; zoom-in respects min viewport target
+            let (minScaleOut, maxScaleIn) = computeScaleBounds(for: skView, scene: scene)
+
+            // Clamp
+            let clampedScale = max(minScaleOut, min(proposedScale, maxScaleIn))
             camera.setScale(clampedScale)
+
+            // Reset recognizer delta and refresh debug overlays
             sender.scale = 1.0
             clampWorldNode(scene: scene)
+            updateCameraOverlay()
+            updateCameraWHLabel()
         }
+    }
+
+    /// Compute camera scale bounds for the current view & scene.
+    /// - minScaleOut: smallest scale (most zoomed-out) so full **map height** fits the view height.
+    /// - maxScaleIn:  largest scale (most zoomed-in) so viewport is not smaller than the target min viewport.
+    private func computeScaleBounds(for skView: SKView, scene: GameScene) -> (minScaleOut: CGFloat, maxScaleIn: CGFloat) {
+        let viewSize = skView.bounds.size
+
+        // Zoom-out bound: make sure full tile map height is visible, plus 111px allowance
+        var minScaleOut: CGFloat = 0.001
+        if let baseMap = scene.baseMap {
+            let mapHeightExact = max(baseMap.mapSize.height * baseMap.yScale, 1)
+            let paddedHeight = mapHeightExact + 111.0
+            minScaleOut = viewSize.height / paddedHeight
+        }
+
+        // Zoom-in bound: enforce your target min viewport (interpolated by screen size)
+        let ranges = targetViewportRanges(for: viewSize)
+        let maxScaleIn = min(viewSize.width / ranges.minW, viewSize.height / ranges.minH)
+
+        return (minScaleOut, maxScaleIn)
     }
 
     private func positionScreenDebugDot() {
