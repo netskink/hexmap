@@ -126,12 +126,29 @@ class GameViewController: UIViewController {
 
     // Cached max-in cap used by gestures and buttons so they agree
     private var cachedMaxInScale: CGFloat = .greatestFiniteMagnitude
+    // Cached max-out (zoom-out) cap that matches "Fit" by height so pinch can't zoom out farther
+    private var cachedMaxOutScale: CGFloat = .greatestFiniteMagnitude
 
-    /// Recompute the max-in zoom cap for the current view/scene sizes
+    /// Fit scale (zoom-out cap) so the entire map height is visible (landscape bias).
+    private func computeFitScaleHeight(for skView: SKView, scene: GameScene) -> CGFloat {
+        guard let mapSceneRect = mapBoundsInScene(scene) else { return 1.0 }
+        let viewH = max(skView.bounds.height, 1)
+        let mapH  = max(mapSceneRect.height, 1)
+        let epsilon: CGFloat = 0.998   // slight bias to ensure full coverage
+        // SpriteKit: larger xScale => more zoomed OUT; viewport = view / scale.
+        // To show entire map by HEIGHT: view/scale >= mapH  ⇒  scale <= viewH/mapH.
+        // We return that scale as the *cap* for zooming OUT.
+        return (mapH / viewH) * epsilon
+    }
+
+    /// Recompute the max-in and max-out zoom caps for the current view/scene sizes
     private func updateZoomCaps() {
         guard let skView = self.view as? SKView,
-              let scene = skView.scene as? GameScene else { return }
-        cachedMaxInScale = computeMaxInScale(for: skView, scene: scene)
+              let scene  = skView.scene as? GameScene else { return }
+        // Max zoom-in (smallest scale value allowed)
+        cachedMaxInScale  = computeMaxInScale(for: skView, scene: scene)
+        // Max zoom-out (largest scale value allowed) — match Fit-by-height
+        cachedMaxOutScale = computeFitScaleHeight(for: skView, scene: scene)
     }
 
     private func ensureDebugPanel() {
@@ -643,8 +660,8 @@ class GameViewController: UIViewController {
         if sender.state == .began || sender.state == .changed {
             // SpriteKit: larger xScale => zoomed OUT. To zoom in with pinch (>1.0), divide.
             let proposed = camera.xScale / sender.scale
-            // Enforce lower bound (min scale => max zoom-in). Larger scale = zoomed out.
-            let clamped = max(proposed, cachedMaxInScale)
+            // Clamp to [max-in (min scale), max-out (fit-by-height cap)]
+            let clamped = min(max(proposed, cachedMaxInScale), cachedMaxOutScale)
             camera.setScale(clamped)
             camera.yScale = camera.xScale
             sender.scale = 1.0
@@ -653,11 +670,9 @@ class GameViewController: UIViewController {
             if let scene = (self.view as? SKView)?.scene as? GameScene { updateDebugOverlays(scene: scene) }
         }
         if sender.state == .ended || sender.state == .cancelled {
-            // Snap back if user pushed past the cap due to gesture jitter
-            if camera.xScale < cachedMaxInScale {
-                camera.setScale(cachedMaxInScale)
-                camera.yScale = camera.xScale
-            }
+            if camera.xScale < cachedMaxInScale { camera.setScale(cachedMaxInScale) }
+            if camera.xScale > cachedMaxOutScale { camera.setScale(cachedMaxOutScale) }
+            camera.yScale = camera.xScale
         }
     }
     // (old handleFitTap removed; keeping only the later version below)
@@ -815,21 +830,16 @@ class GameViewController: UIViewController {
               let scene = skView.scene as? GameScene,
               let camera = scene.camera,
               let _ = scene.baseMap,
-              let mapSceneRect = mapBoundsInScene(scene) else {
+              let _ = mapBoundsInScene(scene) else {
             showToast("Fit unavailable: map not ready")
             return
         }
 
-        // Viewport size in points (== scene units before camera), with safety clamps
+        // Ensure caps are current, then use the same cap the pinch uses for zoom-out.
+        updateZoomCaps()
+        let fitScale = cachedMaxOutScale
         let viewW = max(skView.bounds.width, 1)
         let viewH = max(skView.bounds.height, 1)
-
-        // Fit-to-map by **height** (landscape). Make the viewport height match (or slightly exceed) the map height.
-        let mapW = max(mapSceneRect.width, 1)
-        let mapH = max(mapSceneRect.height, 1)
-        let epsilon: CGFloat = 0.998 // slight bias to ensure full coverage
-        let fitScale = (mapH / viewH) * epsilon
-
         camera.setScale(fitScale)
         camera.yScale = camera.xScale
 
@@ -843,7 +853,7 @@ class GameViewController: UIViewController {
         #if DEBUG
         let camW = viewW / camera.xScale
         let camH = viewH / camera.yScale
-        print("[FIT] view: (\(Int(viewW))x\(Int(viewH)))  mapScene: (\(Int(mapW))x\(Int(mapH)))  fitScale=\(String(format: "%.4f", fitScale))  camViewportAfter: (\(Int(camW))x\(Int(camH)))")
+        print("[FIT] view: (\(Int(viewW))x\(Int(viewH)))  fitScale=\(String(format: "%.4f", fitScale))  camViewportAfter: (\(Int(camW))x\(Int(camH)))")
         #endif
 
         showToast("Fit: full map visible")
