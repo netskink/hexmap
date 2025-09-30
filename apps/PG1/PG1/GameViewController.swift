@@ -9,6 +9,9 @@ class GameViewController: UIViewController {
     private var debugPanel: UIStackView?
     private var btnFit: UIButton?
     private var btnMaxIn: UIButton?
+    
+    // One-time assertion flag to avoid log spam
+    private var didWarnViewportOnce = false
 
     private func makeDebugButton(title: String) -> UIButton {
         let b = UIButton(type: .system)
@@ -34,6 +37,11 @@ class GameViewController: UIViewController {
 
 
     private let DEBUG_OVERLAYS = true
+    // Debug logging for pan/clamp
+    private let DEBUG_PAN_LOGS = true
+    private func dbg(_ text: @autoclosure () -> String) {
+        if DEBUG_PAN_LOGS { print(text()) }
+    }
 
     // MARK: - Deterministic test & clamp toggles
     /// Quantize camera scale to 3 decimals to reduce floating error after pinch.
@@ -131,13 +139,10 @@ class GameViewController: UIViewController {
 
     /// Fit scale (zoom-out cap) so the entire map height is visible (landscape bias).
     private func computeFitScaleHeight(for skView: SKView, scene: GameScene) -> CGFloat {
-        guard let mapSceneRect = mapBoundsInScene(scene) else { return 1.0 }
+        guard let rect = backgroundBoundsInScene(scene) else { return 1.0 }
         let viewH = max(skView.bounds.height, 1)
-        let mapH  = max(mapSceneRect.height, 1)
-        let epsilon: CGFloat = 0.998   // slight bias to ensure full coverage
-        // SpriteKit: larger xScale => more zoomed OUT; viewport = view / scale.
-        // To show entire map by HEIGHT: view/scale >= mapH  ⇒  scale <= viewH/mapH.
-        // We return that scale as the *cap* for zooming OUT.
+        let mapH  = max(rect.height, 1)
+        let epsilon: CGFloat = 0.998
         return (mapH / viewH) * epsilon
     }
 
@@ -369,6 +374,53 @@ class GameViewController: UIViewController {
                       width: halfW * 2, height: halfH * 2)
     }
 
+    /// One-time assert-style diagnostic if the viewport escapes the map bounds (in world coords).
+    private func debugAssertViewportInsideMap(_ scene: GameScene, where tag: String) {
+        guard let skView = self.view as? SKView,
+              let cam = scene.camera,
+              let map = scene.baseMap else { return }
+
+        if didWarnViewportOnce { return }
+
+        let vpW = viewportRectInWorld(scene, cam: cam, viewSize: skView.bounds.size)
+        let base = backgroundBoundsInWorld(scene) ?? (effectiveMapBoundsWorld(scene) ?? map.frame)
+        
+        let outside =
+            (vpW.minX < base.minX) ||
+            (vpW.maxX > base.maxX) ||
+            (vpW.minY < base.minY) ||
+            (vpW.maxY > base.maxY)
+
+        if outside {
+            didWarnViewportOnce = true
+            let dxL = base.minX - vpW.minX
+            let dxR = vpW.maxX - base.maxX
+            let dyB = base.minY - vpW.minY
+            let dyT = vpW.maxY - base.maxY
+            let insetX = (map.tileSize.width * 0.5)
+            let insetY = (map.tileSize.height * 0.25)
+            print("""
+            ❗️ASSERT(OOB \(tag)): viewport is outside effective map bounds
+               vpW=[\(String(format: "%.1f", vpW.minX)),\(String(format: "%.1f", vpW.minY)),\(String(format: "%.1f", vpW.maxX)),\(String(format: "%.1f", vpW.maxY))]
+               mapBase=[\(String(format: "%.1f", map.frame.minX)),\(String(format: "%.1f", map.frame.minY)),\(String(format: "%.1f", map.frame.maxX)),\(String(format: "%.1f", map.frame.maxY))] insetX=\(String(format: "%.1f", insetX)) insetY=\(String(format: "%.1f", insetY))
+               mapEff=[\(String(format: "%.1f", base.minX)),\(String(format: "%.1f", base.minY)),\(String(format: "%.1f", base.maxX)),\(String(format: "%.1f", base.maxY))]
+               deltas: left=\(String(format: "%.2f", dxL)) right=\(String(format: "%.2f", dxR)) bottom=\(String(format: "%.2f", dyB)) top=\(String(format: "%.2f", dyT))
+            """)
+        }
+    }
+    
+    
+    private func effectiveMapBoundsWorld(_ scene: GameScene) -> CGRect? {
+        guard let map = scene.baseMap else { return nil }
+        let base = map.frame
+        // For flat-top hexes, there are transparent slanted corners on the left/right (~0.5*tileWidth)
+        // and shallow gaps at top/bottom (~0.25*tileHeight) due to vertical staggering.
+        let insetX = max(map.tileSize.width * 0.5, 0)
+        let insetY = max(map.tileSize.height * 0.25, 0)
+        return base.insetBy(dx: insetX, dy: insetY)
+    }
+    
+    
     /// Viewport rect in WORLD space, by converting scene corners into worldNode coords
     private func viewportRectInWorld(_ scene: GameScene, cam: SKCameraNode, viewSize: CGSize) -> CGRect {
         let rS = viewportRectInScene(scene, cam: cam, viewSize: viewSize)
@@ -623,6 +675,8 @@ class GameViewController: UIViewController {
         cycleClampMode()
     }
 
+    
+    
     @objc func handlePan(_ sender: UIPanGestureRecognizer) {
         guard let skView = self.view as? SKView,
               let scene = skView.scene as? GameScene else { return }
@@ -637,7 +691,18 @@ class GameViewController: UIViewController {
             scene.worldNode.position.x += translation.x
             scene.worldNode.position.y -= translation.y
         }
-
+        // Clamp after updating worldNode position
+        let beforeWorld = scene.worldNode.position
+        clampWorldNode(scene: scene)
+        let afterWorld = scene.worldNode.position
+        if let cam = scene.camera {
+            let dxScene = translation.x / max(cam.xScale, 0.0001)
+            let dyScene = -translation.y / max(cam.yScale, 0.0001)
+            let corrX = afterWorld.x - (beforeWorld.x + dxScene)
+            let corrY = afterWorld.y - (beforeWorld.y + dyScene)
+            dbg(String(format:"PAN dx=%.2f dy=%.2f scale=%.3f corr=(%.2f,%.2f)",
+                       dxScene, dyScene, cam.xScale, corrX, corrY))
+        }
 
         updateCameraOverlay()
         updateCameraWHLabel()
@@ -645,9 +710,12 @@ class GameViewController: UIViewController {
 
         // Optional gentle settle when the finger lifts (already at clamped pos)
         if sender.state == .ended || sender.state == .cancelled {
+            dbg("PAN ended at \(scene.worldNode.position)")
+            clampWorldNode(scene: scene)
             let snap = SKAction.move(to: scene.worldNode.position, duration: 0.15)
             snap.timingMode = .easeOut
             scene.worldNode.run(snap)
+            debugAssertViewportInsideMap(scene, where: "pan.ended")
         }
 
     }
@@ -668,11 +736,36 @@ class GameViewController: UIViewController {
             updateCameraOverlay()
             updateCameraWHLabel()
             if let scene = (self.view as? SKView)?.scene as? GameScene { updateDebugOverlays(scene: scene) }
+            clampWorldNode(scene: scene)
+            // Debug snapshot after pinch->clamp
+            if let map = scene.baseMap {
+                let vpAfter = viewportRectInWorld(scene, cam: camera, viewSize: skView.bounds.size)
+                let base = map.frame
+                dbg(String(format:"PINCH(changed) clamp snapshot: scale=%.4f vp=[%.1f,%.1f,%.1f,%.1f] map=[%.1f,%.1f,%.1f,%.1f] world=(%.1f,%.1f)",
+                           camera.xScale,
+                           vpAfter.minX, vpAfter.minY, vpAfter.maxX, vpAfter.maxY,
+                           base.minX, base.minY, base.maxX, base.maxY,
+                           scene.worldNode.position.x, scene.worldNode.position.y))
+                debugAssertViewportInsideMap(scene, where: "pinch.changed")
+            }
         }
         if sender.state == .ended || sender.state == .cancelled {
             if camera.xScale < cachedMaxInScale { camera.setScale(cachedMaxInScale) }
             if camera.xScale > cachedMaxOutScale { camera.setScale(cachedMaxOutScale) }
             camera.yScale = camera.xScale
+            clampWorldNode(scene: scene)
+            // Debug snapshot after pinch end
+            if let map = scene.baseMap {
+                let vpAfter = viewportRectInWorld(scene, cam: camera, viewSize: skView.bounds.size)
+                let base = map.frame
+                dbg(String(format:"PINCH(ended) clamp snapshot: scale=%.4f vp=[%.1f,%.1f,%.1f,%.1f] map=[%.1f,%.1f,%.1f,%.1f] world=(%.1f,%.1f)",
+                           camera.xScale,
+                           vpAfter.minX, vpAfter.minY, vpAfter.maxX, vpAfter.maxY,
+                           base.minX, base.minY, base.maxX, base.maxY,
+                           scene.worldNode.position.x, scene.worldNode.position.y))
+
+                debugAssertViewportInsideMap(scene, where: "pinch.ended")
+            }
         }
     }
     // (old handleFitTap removed; keeping only the later version below)
@@ -685,6 +778,7 @@ class GameViewController: UIViewController {
         updateZoomCaps()
         camera.setScale(cachedMaxInScale)
         camera.yScale = camera.xScale
+        clampWorldNode(scene: scene)
         updateCameraOverlay(); updateCameraWHLabel(); updateDebugOverlays(scene: scene)
     }
 
@@ -726,6 +820,19 @@ class GameViewController: UIViewController {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
+    /// Convert a rect defined in scene coordinates into the target node's coordinate space.
+    private func rectFromSceneToNode(_ rect: CGRect, to: SKNode, scene: SKScene) -> CGRect {
+        let bl = to.convert(CGPoint(x: rect.minX, y: rect.minY), from: scene)
+        let br = to.convert(CGPoint(x: rect.maxX, y: rect.minY), from: scene)
+        let tl = to.convert(CGPoint(x: rect.minX, y: rect.maxY), from: scene)
+        let tr = to.convert(CGPoint(x: rect.maxX, y: rect.maxY), from: scene)
+        let minX = min(bl.x, br.x, tl.x, tr.x)
+        let maxX = max(bl.x, br.x, tl.x, tr.x)
+        let minY = min(bl.y, br.y, tl.y, tr.y)
+        let maxY = max(bl.y, br.y, tl.y, tr.y)
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
     /// Map bounds in **scene** coordinates.
     /// Converts the tile map's frame (in worldNode space) into scene space, so the brown box
     /// and clamp logic move with the world as it pans/zooms.
@@ -739,6 +846,37 @@ class GameViewController: UIViewController {
         let frameInWorld = map.frame              // in worldNode space
         let rectInScene  = rectFromNodeToScene(frameInWorld, from: scene.worldNode, scene: scene)
         return rectInScene
+    }
+
+    /// Background bounds in **scene** coordinates. Falls back to map bounds if no background.
+    private func backgroundBoundsInScene(_ scene: GameScene) -> CGRect? {
+        // Case 1: background exists anywhere in scene tree
+        if let bgAny = scene.childNode(withName: "//background") {
+            let parent = bgAny.parent ?? scene
+            let frameInParent = bgAny.frame
+            return rectFromNodeToScene(frameInParent, from: parent, scene: scene)
+        }
+        // Case 2: no background; use map bounds in scene
+        return mapBoundsInScene(scene)
+    }
+    
+    
+    /// Background bounds expressed in worldNode coordinates. Prefers a child named "background" under worldNode.
+    private func backgroundBoundsInWorld(_ scene: GameScene) -> CGRect? {
+        guard let world = scene.worldNode else { return nil }
+        // Case 1: background is a child of worldNode (preferred)
+        if let bgWorld = world.childNode(withName: "background") {
+            return bgWorld.frame // already in world's coordinates
+        }
+        // Case 2: background exists somewhere in the scene hierarchy
+        if let bgAny = scene.childNode(withName: "//background") {
+            // Convert its frame (in parent space) to SCENE space, then to WORLD space
+            let parent = bgAny.parent ?? scene
+            let frameInParent = bgAny.frame
+            let frameInScene  = rectFromNodeToScene(frameInParent, from: parent, scene: scene)
+            return rectFromSceneToNode(frameInScene, to: world, scene: scene)
+        }
+        return nil
     }
     
     
@@ -784,46 +922,6 @@ class GameViewController: UIViewController {
         scene.worldNode.position.y -= dy
     }
 
-//    @objc private func handleFitTap() {
-//        guard let skView = self.view as? SKView,
-//              let scene = skView.scene as? GameScene,
-//              let camera = scene.camera,
-//              let _ = scene.baseMap else {
-//            showToast("Fit unavailable: map not ready")
-//            return
-//        }
-//
-//        // Recompute caps (not strictly required for Fit, but keeps state consistent)
-//        updateZoomCaps()
-//
-//        // Compute a true FIT-TO-MAP (show entire map). The camera viewport in scene units is
-//        //   viewport = viewSize / scale
-//        // To make the entire map visible, we require viewport >= mapSize on BOTH axes ⇒
-//        //   scale <= min(viewW/mapW, viewH/mapH)
-//        // Use a tiny epsilon < 1 so we bias toward zooming slightly farther out, ensuring
-//        // the viewport is not smaller than the map due to rounding.
-//        guard let mapSceneRect = mapBoundsInScene(scene) else {
-//            showToast("Fit unavailable: map bounds not ready")
-//            return
-//        }
-//        let mapW = max(mapSceneRect.width, 1)
-//        let mapH = max(mapSceneRect.height, 1)
-//        let viewW = max(skView.bounds.width, 1)
-//        let viewH = max(skView.bounds.height, 1)
-//
-//        let epsilon: CGFloat = 0.998 // slightly under to guarantee full coverage
-//        let fitScale = min(viewW / mapW, viewH / mapH) * epsilon
-//
-//        camera.setScale(fitScale)
-//        camera.yScale = camera.xScale
-//
-//        // Center the map under the camera and refresh overlays/HUD.
-//        centerCameraOnMap(scene: scene)
-//        updateCameraOverlay()
-//        updateCameraWHLabel()
-//        updateDebugOverlays(scene: scene)
-//        showToast("Fit: full map visible")
-//    }
 
     @objc private func handleFitTap() {
         guard let skView = self.view as? SKView,
@@ -862,47 +960,103 @@ class GameViewController: UIViewController {
     
     
     /// Clamp so the camera's viewport (in scene space) never shows outside the map bounds.
-    /// This adjusts `scene.worldNode.position` so that the camera center remains within
-    /// [map.min+halfViewport, map.max-halfViewport] on each axis.
+    /// This adjusts `scene.worldNode.position` analytically in worldNode's coordinate space.
     private func clampWorldNode(scene: GameScene) {
         guard let skView = self.view as? SKView,
-              let camera = scene.camera,
-              let mapScene = mapBoundsInScene(scene) else { return }
+              let cam = scene.camera,
+              let map = scene.baseMap else { return }
 
-        // Current viewport size in scene units
+        // --- Debug snapshot (shows which base we use) ---
+        do {
+            let vpW0 = viewportRectInWorld(scene, cam: cam, viewSize: skView.bounds.size)
+            let mapFrame0 = map.frame
+            let effMap0 = effectiveMapBoundsWorld(scene) ?? mapFrame0
+            let bg0 = backgroundBoundsInWorld(scene)
+            let base0 = bg0 ?? effMap0
+            dbg(String(format:"CLAMP in cam=(%.1f,%.1f) scale=%.4f vp=[%.1f,%.1f,%.1f,%.1f] map=[%.1f,%.1f,%.1f,%.1f] eff=[%.1f,%.1f,%.1f,%.1f] base=[%.1f,%.1f,%.1f,%.1f] (%@)",
+                       cam.position.x, cam.position.y, cam.xScale,
+                       vpW0.minX, vpW0.minY, vpW0.maxX, vpW0.maxY,
+                       mapFrame0.minX, mapFrame0.minY, mapFrame0.maxX, mapFrame0.maxY,
+                       effMap0.minX, effMap0.minY, effMap0.maxX, effMap0.maxY,
+                       base0.minX, base0.minY, base0.maxX, base0.maxY,
+                       (bg0 != nil ? "background" : "map")))
+        }
+
+        // --- Pass 1: Scene-space clamp (very stable right after zoom) ---
         let viewSize = skView.bounds.size
-        let halfW = viewSize.width  / (2.0 * max(camera.xScale, 0.0001))
-        let halfH = viewSize.height / (2.0 * max(camera.yScale, 0.0001))
+        let vpScene = viewportRectInScene(scene, cam: cam, viewSize: viewSize)
+        if let baseScene = backgroundBoundsInScene(scene) {
+            var dxCam: CGFloat = 0
+            var dyCam: CGFloat = 0
+            let epsS: CGFloat = 0.5 // ~half a pixel in scene units
 
-        // Target camera center clamped inside the map rect expanded inward by half the viewport
-        let minCX = mapScene.minX + halfW
-        let maxCX = mapScene.maxX - halfW
-        let minCY = mapScene.minY + halfH
-        let maxCY = mapScene.maxY - halfH
+            if vpScene.width >= baseScene.width - epsS {
+                dxCam += (baseScene.midX - vpScene.midX) // center horizontally
+            } else {
+                if vpScene.minX < baseScene.minX { dxCam += (baseScene.minX - vpScene.minX) }
+                if vpScene.maxX > baseScene.maxX { dxCam -= (vpScene.maxX - baseScene.maxX) }
+            }
 
-        // If the viewport is larger than the map on an axis, just center that axis.
-        let targetCX: CGFloat
-        if minCX > maxCX {
-            targetCX = mapScene.midX
-        } else {
-            targetCX = min(max(camera.position.x, minCX), maxCX)
-        }
-        let targetCY: CGFloat
-        if minCY > maxCY {
-            targetCY = mapScene.midY
-        } else {
-            targetCY = min(max(camera.position.y, minCY), maxCY)
+            if vpScene.height >= baseScene.height - epsS {
+                dyCam += (baseScene.midY - vpScene.midY) // center vertically
+            } else {
+                if vpScene.minY < baseScene.minY { dyCam += (baseScene.minY - vpScene.minY) }
+                if vpScene.maxY > baseScene.maxY { dyCam -= (vpScene.maxY - baseScene.maxY) }
+            }
+
+            if abs(dxCam) > 0.0005 || abs(dyCam) > 0.0005 {
+                // Move CONTENT opposite the desired camera correction (camera fixed)
+                scene.worldNode.position.x -= dxCam
+                scene.worldNode.position.y -= dyCam
+                dbg(String(format: "CLAMP(scene) shift(%.2f,%.2f)", -dxCam, -dyCam))
+            } else {
+                dbg("CLAMP(scene) no adjustment")
+            }
         }
 
-        // Move the world node by the delta needed to place the camera at the target center
-        let dx = targetCX - camera.position.x
-        let dy = targetCY - camera.position.y
-        if dx != 0 || dy != 0 {
-            scene.worldNode.position.x += dx
-            scene.worldNode.position.y += dy
+        // --- Pass 2: World-space fine tune (handles mixed-parent cases) ---
+        let maxIter = 6
+        var iter = 0
+        var applied = false
+        while iter < maxIter {
+            let vpWorld = viewportRectInWorld(scene, cam: cam, viewSize: skView.bounds.size)
+            let baseWorld: CGRect = {
+                if let bg = backgroundBoundsInWorld(scene) { return bg }
+                return effectiveMapBoundsWorld(scene) ?? map.frame
+            }()
+            let epsW: CGFloat = max(1.0 / max(cam.xScale, 0.0001), 0.25)
+
+            var dxW: CGFloat = 0
+            var dyW: CGFloat = 0
+
+            if vpWorld.width >= baseWorld.width - epsW {
+                dxW -= (baseWorld.midX - vpWorld.midX)
+            } else {
+                if vpWorld.minX < baseWorld.minX { dxW -= (baseWorld.minX - vpWorld.minX) }
+                if vpWorld.maxX > baseWorld.maxX { dxW += (vpWorld.maxX - baseWorld.maxX) }
+            }
+
+            if vpWorld.height >= baseWorld.height - epsW {
+                dyW -= (baseWorld.midY - vpWorld.midY)
+            } else {
+                if vpWorld.minY < baseWorld.minY { dyW -= (baseWorld.minY - vpWorld.minY) }
+                if vpWorld.maxY > baseWorld.maxY { dyW += (vpWorld.maxY - baseWorld.maxY) }
+            }
+
+            if abs(dxW) > 0.0005 || abs(dyW) > 0.0005 {
+                scene.worldNode.position.x += dxW
+                scene.worldNode.position.y += dyW
+                applied = true
+                dbg(String(format: "CLAMP(world) iter=%d shift(%.2f,%.2f)", iter, dxW, dyW))
+            } else {
+                if applied == false { dbg("CLAMP(world) analytic no adjustment") }
+                break
+            }
+            iter += 1
         }
+
+        debugAssertViewportInsideMap(scene, where: "clampWorldNode(end)")
     }
-
     // MARK: - Tiny toast helper for quick visual feedback
     private func computeScaleBounds(for skView: SKView, scene: GameScene) -> (minScaleOut: CGFloat, maxScaleIn: CGFloat) {
         let viewSize = skView.bounds.size
