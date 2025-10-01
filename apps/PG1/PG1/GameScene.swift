@@ -36,6 +36,8 @@ class GameScene: SKScene {
     
     // The red background node
     var backGroundNode: SKNode!
+    // The red background node
+    var maxzoombgNode: SKNode!
 
     // Units
     /// Player unit sprite (assigned in `addUnit`).
@@ -78,6 +80,8 @@ class GameScene: SKScene {
         baseMap = map
         guard let background = worldNode.childNode(withName: "background") else { fatalError("Missing background") }
         backGroundNode = background
+        guard let maxzoombg = worldNode.childNode(withName: "maxzoombg") else { fatalError("Missing maxzoombg") }
+        maxzoombgNode = maxzoombg
 
 
         // Find the camera in GameScene.sks
