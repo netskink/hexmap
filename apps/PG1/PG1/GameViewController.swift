@@ -6,6 +6,8 @@ import SpriteKit
 class GameViewController: UIViewController {
     // HUD controls
     private var debugPanel: UIStackView?
+    // Camera scale HUD label
+    private var cameraScaleLabel: UILabel?
     
     // One-time assertion flag to avoid log spam
     private var didWarnViewportOnce = false
@@ -96,6 +98,56 @@ class GameViewController: UIViewController {
 
         // Keep above SpriteKit content
         if let l = cameraWHLabel { skView.bringSubviewToFront(l) }
+
+        // Update the camera scale label as well
+        updateCameraScaleLabel()
+    }
+
+    /// Create/update a HUD label that shows the camera's current xScale and yScale.
+    private func updateCameraScaleLabel() {
+        guard let skView = self.view as? SKView,
+              let scene = skView.scene as? GameScene,
+              let cam = scene.camera else { return }
+
+        // Create label if missing
+        if cameraScaleLabel == nil {
+            let l = UILabel()
+            l.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+            l.textColor = .white
+            l.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+            l.textAlignment = .center
+            l.layer.cornerRadius = 6
+            l.layer.masksToBounds = true
+            l.isUserInteractionEnabled = false
+            (self.view as? SKView)?.addSubview(l)
+            cameraScaleLabel = l
+        }
+
+        // Compute camera scale
+        let xScale = cam.xScale
+        let yScale = cam.yScale
+        cameraScaleLabel?.text = String(format: "scale: x=%.3f y=%.3f", xScale, yScale)
+
+        // Size label and position it below the cameraWHLabel (centered horizontally, below top safe area)
+        cameraScaleLabel?.sizeToFit()
+        let padX: CGFloat = 12
+        let padY: CGFloat = 6
+        if var f = cameraScaleLabel?.frame {
+            f.size.width  += padX
+            f.size.height += padY
+            let inset = skView.safeAreaInsets
+            let viewSize = skView.bounds.size
+            let x = (viewSize.width - f.size.width) * 0.5
+            // Position just below cameraWHLabel if present, else just below top safe area
+            var y: CGFloat = inset.top + 8
+            if let whLabel = cameraWHLabel {
+                y = whLabel.frame.maxY + 4
+            }
+            f.origin = CGPoint(x: x, y: y)
+            cameraScaleLabel?.frame = f
+        }
+        // Keep above SpriteKit content
+        if let l = cameraScaleLabel { skView.bringSubviewToFront(l) }
     }
 
     /// Max zoom-in scale so that at least the 7-hex cluster (center + 6 neighbors) remains fully visible.
@@ -148,13 +200,16 @@ class GameViewController: UIViewController {
         panel.layer.cornerRadius = 8
         panel.translatesAutoresizingMaskIntoConstraints = false
 
-        let maxOut = makeDebugButton(title: "max_out")
-        maxOut.addTarget(self, action: #selector(handleMaxOutTap), for: .touchUpInside)
-        let maxIn = makeDebugButton(title: "max_in")
-        maxIn.addTarget(self, action: #selector(handleMaxInTap), for: .touchUpInside)
+        let minBtn = makeDebugButton(title: "min")
+        minBtn.addTarget(self, action: #selector(handleMinTap), for: .touchUpInside)
+        let midBtn = makeDebugButton(title: "mid")
+        midBtn.addTarget(self, action: #selector(handleMidTap), for: .touchUpInside)
+        let maxBtn = makeDebugButton(title: "max")
+        maxBtn.addTarget(self, action: #selector(handleMaxTap), for: .touchUpInside)
 
-        panel.addArrangedSubview(maxOut)
-        panel.addArrangedSubview(maxIn)
+        panel.addArrangedSubview(minBtn)
+        panel.addArrangedSubview(midBtn)
+        panel.addArrangedSubview(maxBtn)
 
         skView.addSubview(panel)
         NSLayoutConstraint.activate([
@@ -621,6 +676,7 @@ class GameViewController: UIViewController {
 
         updateCameraOverlay()
         updateCameraWHLabel()
+        updateCameraScaleLabel()
         if let scene = (self.view as? SKView)?.scene as? GameScene { updateDebugOverlays(scene: scene) }
 
         // Optional gentle settle when the finger lifts (already at clamped pos)
@@ -637,7 +693,7 @@ class GameViewController: UIViewController {
 
 
     /// Max In: jump directly to the 7-hex cap at current center.
-    @objc private func handleMaxInTap() {
+    @objc private func handleMaxTap() {
         guard let skView = self.view as? SKView,
               let scene = skView.scene as? GameScene,
               let camera = scene.camera else { return }
@@ -645,7 +701,10 @@ class GameViewController: UIViewController {
         camera.setScale(cachedMaxInScale)
         camera.yScale = camera.xScale
         clampWorldNode(scene: scene)
-        updateCameraOverlay(); updateCameraWHLabel(); updateDebugOverlays(scene: scene)
+        updateCameraOverlay()
+        updateCameraWHLabel()
+        updateCameraScaleLabel()
+        updateDebugOverlays(scene: scene)
     }
 
     
@@ -765,13 +824,13 @@ class GameViewController: UIViewController {
     }
 
 
-    @objc private func handleMaxOutTap() {
+    @objc private func handleMinTap() {
         guard let skView = self.view as? SKView,
               let scene = skView.scene as? GameScene,
               let camera = scene.camera,
               let _ = scene.baseMap,
               let _ = mapBoundsInScene(scene) else {
-            showToast("max_out unavailable: map not ready")
+            showToast("min unavailable: map not ready")
             return
         }
 
@@ -788,15 +847,16 @@ class GameViewController: UIViewController {
         clampWorldNode(scene: scene)
         updateCameraOverlay()
         updateCameraWHLabel()
+        updateCameraScaleLabel()
         updateDebugOverlays(scene: scene)
 
         #if DEBUG
         let camW = viewW / camera.xScale
         let camH = viewH / camera.yScale
-        print("[MAX_OUT] view: (\(Int(viewW))x\(Int(viewH)))  fitScale=\(String(format: "%.4f", fitScale))  camViewportAfter: (\(Int(camW))x\(Int(camH)))")
+        print("[MIN] view: (\(Int(viewW))x\(Int(viewH)))  fitScale=\(String(format: "%.4f", fitScale))  camViewportAfter: (\(Int(camW))x\(Int(camH)))")
         #endif
 
-        showToast("max_out: full map visible")
+        showToast("min: full map visible")
     }
     
     
@@ -847,4 +907,24 @@ class GameViewController: UIViewController {
     }
 
     
+    /// Mid Zoom: set scale to midpoint between max_in and max_out
+    @objc private func handleMidTap() {
+        guard let skView = self.view as? SKView,
+              let scene = skView.scene as? GameScene,
+              let camera = scene.camera else { return }
+        // ensure caps are up to date
+        updateZoomCaps()
+        let minScale = cachedMaxInScale
+        let maxScale = cachedMaxOutScale
+        let mid = (minScale + maxScale) * 0.5
+        camera.setScale(mid)
+        camera.yScale = camera.xScale
+        // keep current center; just clamp to bounds
+        clampWorldNode(scene: scene)
+        updateCameraOverlay()
+        updateCameraWHLabel()
+        updateCameraScaleLabel()
+        updateDebugOverlays(scene: scene)
+        showToast(String(format: "mid: scale=%.3f", mid))
+    }
 }
