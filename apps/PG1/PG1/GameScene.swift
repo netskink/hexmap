@@ -33,6 +33,9 @@ class GameScene: SKScene {
     /// The flat-top hex tile map (from GameScene.sks → World/BaseMap).
     /// Used for coordinate transforms, neighbor queries, and pathing.
     var baseMap: SKTileMapNode!
+    
+    // The red background node
+    var backGroundNode: SKNode!
 
     // Units
     /// Player unit sprite (assigned in `addUnit`).
@@ -73,6 +76,8 @@ class GameScene: SKScene {
         worldNode = world
         guard let map = worldNode.childNode(withName: "BaseMap") as? SKTileMapNode else { fatalError("Missing BaseMap") }
         baseMap = map
+        guard let background = worldNode.childNode(withName: "background") else { fatalError("Missing background") }
+        backGroundNode = background
 
 
         // Find the camera in GameScene.sks
@@ -88,6 +93,8 @@ class GameScene: SKScene {
         
         // Draw a debug red line around the worldNode - a union of all children
         drawFrameBox(theNode: world, in: self)
+        // Draw a debug yellow line around the worldNode - a union of all children
+        drawFrameBox(theNode: background, in: self, color: .yellow)
 
         
         // Example starting positions (OFFSET indices)
