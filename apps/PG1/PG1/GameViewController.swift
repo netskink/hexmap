@@ -17,6 +17,10 @@ class GameViewController: UIViewController {
     
     // --- Pan Debug Kit (no behavior changes) ---
     private var panTick = 0
+    
+    // MARK: - Pinch state
+    private var pinchStartScale: CGFloat = 1.0
+    private var pinchAnchorScene: CGPoint?
 
     // Guard insets in **screen points** for each edge; converted to WORLD units per current camera scale.
     private var stopInsetsPts: UIEdgeInsets = .zero
@@ -233,6 +237,98 @@ class GameViewController: UIViewController {
             break
         }
     }
+    
+
+    /// Two-finger pinch-to-zoom: zoom the camera uniformly, preserving the pinch focus and
+    /// clamping to the background every frame.
+    @objc func handlePinch(_ sender: UIPinchGestureRecognizer) {
+        guard let skView = self.view as? SKView,
+              let scene  = skView.scene as? GameScene,
+              let cam    = scene.camera else { return }
+
+        switch sender.state {
+        case .began:
+            // Keep caps in sync with current view/scene size
+            updateZoomCaps()
+            pinchStartScale  = cam.xScale
+            // Anchor in SCENE coordinates under the pinch centroid
+            pinchAnchorScene = scene.convertPoint(fromView: sender.location(in: skView))
+            // Same 1-pt safety guard used by min/mid/max
+            stopInsetsPts = defaultStopInsetsPts
+            panSnapshot("pinch.begin")
+
+        case .changed:
+            guard let anchorS = pinchAnchorScene else { return }
+
+            // Desired new camera scale (SpriteKit: larger scale => zooms in)
+            var newScale = pinchStartScale * sender.scale
+
+            // Clamp between your min/max caps (order-agnostic)
+            let lo = min(cachedMaxInScale, cachedMaxOutScale)
+            let hi = max(cachedMaxInScale, cachedMaxOutScale)
+            if !newScale.isFinite { newScale = pinchStartScale }
+            newScale = max(lo, min(hi, newScale))
+
+            // Apply uniformly
+            cam.setScale(newScale)
+            cam.yScale = cam.xScale
+
+            // Preserve the pinch focus: compute where the same screen point maps now,
+            // then offset the camera so the original scene point stays under the fingers.
+            let anchorAfterS = scene.convertPoint(fromView: sender.location(in: skView))
+
+            let camPosS: CGPoint = {
+                if let parent = cam.parent, parent !== scene {
+                    return scene.convert(cam.position, from: parent)
+                } else { return cam.position }
+            }()
+
+            var proposedS = CGPoint(
+                x: camPosS.x + (anchorS.x - anchorAfterS.x),
+                y: camPosS.y + (anchorS.y - anchorAfterS.y)
+            )
+
+            // Clamp the camera against the background (scene-space clamp)
+            proposedS = correctedCameraPosition(scene: scene, proposed: proposedS)
+
+            if let parent = cam.parent, parent !== scene {
+                cam.position = parent.convert(proposedS, from: scene)
+            } else {
+                cam.position = proposedS
+            }
+
+            // HUD/diagnostics
+            updateCameraOverlay()
+            updateCameraWHLabel()
+            updateCameraScaleLabel()
+            updateDebugOverlays(scene: scene)
+            updateWorldDiagnosticOverlays(scene: scene)
+            #if DEBUG
+            debugAssertViewportInsideBackground(scene, where: "pinch.changed")
+            #endif
+            panTick &+= 1
+            if panTick % 6 == 0 { panSnapshot("pinch.changed") }
+
+        case .ended, .cancelled, .failed:
+            // Hard stop inside bounds and clear anchor
+            clampCameraPosition(scene: scene)
+            pinchAnchorScene = nil
+
+            updateCameraOverlay()
+            updateCameraWHLabel()
+            updateCameraScaleLabel()
+            updateDebugOverlays(scene: scene)
+            updateWorldDiagnosticOverlays(scene: scene)
+            #if DEBUG
+            debugAssertViewportInsideBackground(scene, where: "pinch.ended")
+            #endif
+            panSnapshot("pinch.ended")
+
+        default:
+            break
+        }
+    }
+    
     
     
     private func makeDebugButton(title: String) -> UIButton {
@@ -566,7 +662,7 @@ class GameViewController: UIViewController {
         // 6) Log to verify you’re in the right world
         print("✅ Presented GameScene.sks as GameScene; SKView.bounds =", skView.bounds)
         
-        
+        // pinch recognizer setup
         let panRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         panRecognizer.minimumNumberOfTouches = 1
         panRecognizer.maximumNumberOfTouches = 1
@@ -574,6 +670,11 @@ class GameViewController: UIViewController {
         
         panRecognizer.cancelsTouchesInView = false
         
+        
+        // pinch recognizer setup
+        let pinchRecognizer = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        view.addGestureRecognizer(pinchRecognizer)
+        pinchRecognizer.cancelsTouchesInView = false
         
     }
     
