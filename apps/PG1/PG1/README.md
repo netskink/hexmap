@@ -146,3 +146,10 @@ graph TD
   br corner view      width, height:    852.5, 394.7
   
 ```
+
+Quick recap of why this holds the map perfectly:
+    •    We compute the exact viewport for the proposed camera center in scene space and clamp against the background (also in scene space).
+    •    If the viewport is larger than the map on an axis, we pin to the map’s center on that axis.
+    •    A tiny inward epsilon prevents rounding slivers that used to reveal the green.
+
+
