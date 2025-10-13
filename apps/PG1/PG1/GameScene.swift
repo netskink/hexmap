@@ -28,7 +28,8 @@ class GameScene: SKScene {
 
     /// Root container for all world content (map, units, overlays).
     /// Apply panning/zooming to this node so the scene camera stays fixed.
-    var worldNode: SKNode!
+    // Container for all gameplay content defined in GameScene.sks
+    @IBOutlet weak var worldNode: SKNode!
 
     /// The flat-top hex tile map (from GameScene.sks → World/BaseMap).
     /// Used for coordinate transforms, neighbor queries, and pathing.
@@ -74,15 +75,40 @@ class GameScene: SKScene {
     /// - Spawns the example units at offset coordinates.
     /// - Enables player input to begin the turn loop.
     override func didMove(to view: SKView) {
-        guard let world = childNode(withName: "//World") else { fatalError("Missing //World") }
-        worldNode = world
-        guard let map = worldNode.childNode(withName: "BaseMap") as? SKTileMapNode else { fatalError("Missing BaseMap") }
+        
+        
+        super.didMove(to: view)
+
+        
+        
+        // Find World (keep your fallback)
+        if worldNode == nil { worldNode = childNode(withName: "World") }
+        precondition(worldNode != nil, "GameScene.sks must contain a node named 'World'")
+
+        // Helper: recursive lookup under World, else anywhere in the scene
+        func findNode<T: SKNode>(_ name: String, as type: T.Type) -> T? {
+            (worldNode.childNode(withName: name) as? T) ??
+            (childNode(withName: "//" + name) as? T)
+        }
+
+        guard let map = findNode("BaseMap", as: SKTileMapNode.self) else {
+            fatalError("Missing BaseMap (expected SKTileMapNode)")
+        }
         baseMap = map
-        guard let background = worldNode.childNode(withName: "background") else { fatalError("Missing background") }
+
+        guard let background = findNode("background", as: SKNode.self) else {
+            fatalError("Missing background")
+        }
         backGroundNode = background
-        guard let maxzoombg = worldNode.childNode(withName: "maxzoombg") else { fatalError("Missing maxzoombg") }
+
+        guard let maxzoombg = findNode("maxzoombg", as: SKNode.self) else {
+            fatalError("Missing maxzoombg")
+        }
         maxzoombgNode = maxzoombg
 
+        // Optional: sanity prints
+        print("BaseMap type:", type(of: baseMap))            // should be SKTileMapNode
+        print("BaseMap path OK:", baseMap.name ?? "<nil>")
 
         // Find the camera in GameScene.sks
         if let cameraNode = childNode(withName: "Camera") as? SKCameraNode {
@@ -90,13 +116,19 @@ class GameScene: SKScene {
         }
     
         
+        // temp to set background to black
+        //let cover = SKSpriteNode(color: .black, size: CGSize(width: 10_000, height: 10_000))
+        //cover.zPosition = -10_000
+        //cover.name = "bgCover"
+        //worldNode?.addChild(cover)
+        
         overlayNode = worldNode.childNode(withName: "Overlay") ?? {
             let n = SKNode(); n.name = "Overlay"; n.zPosition = 1000; worldNode.addChild(n); return n
         }()
 
         
         // Draw a debug red line around the worldNode - a union of all children
-        drawFrameBox(theNode: world, in: self)
+        drawFrameBox(theNode: worldNode, in: self)
         // Draw a debug yellow line around the worldNode - a union of all children
         drawFrameBox(theNode: background, in: self, color: .yellow)
 
