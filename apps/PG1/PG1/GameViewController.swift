@@ -3,16 +3,12 @@ import SpriteKit
 import CoreGraphics
 
 class GameViewController: UIViewController {
-    // HUD controls
-    private var debugPanel: UIStackView?
-    // Camera scale HUD label
-    private var cameraScaleLabel: UILabel?
 
     // One-time assertion flag to avoid log spam
     private var didWarnViewportOnce = false
     // MARK: - Pan state
     private var panAnchorScene: CGPoint?
-    private var panStartWorldPos: CGPoint?
+//    private var panStartWorldPos: CGPoint?
     private var panStartCamPosS: CGPoint?
     
     // --- Pan Debug Kit (no behavior changes) ---
@@ -30,8 +26,8 @@ class GameViewController: UIViewController {
     
     // Desired cam→world stops (WORLD coords) to apply when you press the zoom buttons.
     // Set any side to nil to use the true content edge for that side.
-    private let desiredStopsForMid: (tlX: CGFloat?, trX: CGFloat?, topY: CGFloat?, bottomY: CGFloat?) = (nil, nil, nil, nil)
-    private let desiredStopsForMax: (tlX: CGFloat?, trX: CGFloat?, topY: CGFloat?, bottomY: CGFloat?) = (nil, nil, nil, nil)
+    //private let desiredStopsForMid: (tlX: CGFloat?, trX: CGFloat?, topY: CGFloat?, bottomY: CGFloat?) = (nil, nil, nil, nil)
+    //private let desiredStopsForMax: (tlX: CGFloat?, trX: CGFloat?, topY: CGFloat?, bottomY: CGFloat?) = (nil, nil, nil, nil)
 
     private func fmt(_ p: CGPoint) -> String { String(format: "(%.2f,%.2f)", p.x, p.y) }
     private func fmtR(_ r: CGRect) -> String { String(format: "(x:%.2f y:%.2f w:%.2f h:%.2f)", r.origin.x, r.origin.y, r.size.width, r.size.height) }
@@ -63,11 +59,8 @@ class GameViewController: UIViewController {
         // Extra diagnostics: show which rects we are actually comparing
         if let baseW2 = contentBoundsInWorld(scene) {
             let bgS = rectFromNodeToScene(baseW2, from: world, scene: scene)
-            dbg("[BG@SCENE] vpS=\(fmtR(vpScene)) bgS=\(fmtR(bgS))")
         }
-        print("[PANDBG] \(tag) scale=\(String(format: "%.4f", cam.xScale)) world=\(fmt(world.position)) " +
-              "vpS=\(fmtR(vpScene)) vpW=\(fmtR(vpWorld)) baseW=\(fmtR(baseWorld)) " +
-              "predictCorr=\(fmt(corr)) status=\(status)")
+
     }
    
 
@@ -104,7 +97,7 @@ class GameViewController: UIViewController {
         switch sender.state {
         case .began:
             panSnapshot("pan.begin")
-            debugLogBackgroundResolution(scene: scene)
+ //           debugLogBackgroundResolution(scene: scene)
             if let cam = scene.camera, let bg = contentBoundsInWorld(scene) {
                 let vp = viewportRectInScene(scene, cam: cam, viewSize: skView.bounds.size)
                 print(String(format:"[RANGE BEGIN] x=[%.2f,%.2f] y=[%.2f,%.2f] world=%@", vp.maxX - bg.maxX, vp.minX - bg.minX, vp.maxY - bg.maxY, vp.minY - bg.minY, fmt(world.position)))
@@ -157,14 +150,12 @@ class GameViewController: UIViewController {
                         return scene.convert(cam.position, from: parent)
                     } else { return cam.position }
                 }()
-                dbg("[XRANGE@CHANGED] gapsW x=[\(String(format: "%.2f", minWorldX)),\(String(format: "%.2f", maxWorldX))] y=[\(String(format: "%.2f", minWorldY)),\(String(format: "%.2f", maxWorldY))] pos=\(fmt(camPosS))")
 
                 // World-space gaps (≥0 means inside)
                 let gapL = vpW.minX - bg.minX
                 let gapR = bg.maxX - vpW.maxX
                 let gapB = vpW.minY - bg.minY
                 let gapT = bg.maxY - vpW.maxY
-                print(String(format: "[GAPS@CHANGED] L=%.2f R=%.2f B=%.2f T=%.2f", gapL, gapR, gapB, gapT))
 
                 // Scene-space margins (positive means inside; negative means overshoot → black)
                 let vpS = viewportRectInScene(scene, cam: cam, viewSize: skView.bounds.size)
@@ -173,17 +164,8 @@ class GameViewController: UIViewController {
                 let rS = bgS.maxX - vpS.maxX
                 let bS = vpS.minY - bgS.minY
                 let tS = bgS.maxY - vpS.maxY
-                print(String(format: "[SCENE MARGINS@CHANGED] L=%.2f R=%.2f B=%.2f T=%.2f", lS, rS, bS, tS))
             }
 
-            #if DEBUG
-            debugAssertViewportInsideBackground(scene, where: "pan.changed")
-            #endif
-            
-            updateCameraOverlay()
-            updateCameraWHLabel()
-            updateDebugOverlays(scene: scene)
-            updateWorldDiagnosticOverlays(scene: scene)
             
             panTick &+= 1
             if panTick % 6 == 0 { panSnapshot("pan.changed") }
@@ -209,24 +191,8 @@ class GameViewController: UIViewController {
                         return scene.convert(cam.position, from: parent)
                     } else { return cam.position }
                 }()
-                if abs(gapL) <= eps || abs(gapR) <= eps {
-                    dbg("[HIT X EDGE] camS.x=\(String(format: "%.2f", camPosS.x)) gaps=[L:\(String(format: "%.2f", gapL)) R:\(String(format: "%.2f", gapR))]")
-                }
-                if abs(gapB) <= eps || abs(gapT) <= eps {
-                    dbg("[HIT Y EDGE] camS.y=\(String(format: "%.2f", camPosS.y)) gaps=[B:\(String(format: "%.2f", gapB)) T:\(String(format: "%.2f", gapT))]")
-                }
-                dbg("[XRANGE END] gapsW x=[\(String(format: "%.2f", gapL)),\(String(format: "%.2f", gapR))] worldY=[\(String(format: "%.2f", gapB)),\(String(format: "%.2f", gapT))]")
             }
             
-
-            // Refresh overlays/HUD and assert
-            updateCameraOverlay()
-            updateCameraWHLabel()
-            updateDebugOverlays(scene: scene)
-            updateWorldDiagnosticOverlays(scene: scene)
-            #if DEBUG
-            debugAssertViewportInsideBackground(scene, where: "pan.ended.hardstop")
-            #endif
 
             panSnapshot("pan.ended")
             return
@@ -295,14 +261,6 @@ class GameViewController: UIViewController {
                 cam.position = proposedS
             }
 
-            // HUD/diagnostics
-            updateCameraOverlay()
-            updateCameraWHLabel()
-            updateDebugOverlays(scene: scene)
-            updateWorldDiagnosticOverlays(scene: scene)
-            #if DEBUG
-            debugAssertViewportInsideBackground(scene, where: "pinch.changed")
-            #endif
             panTick &+= 1
             if panTick % 6 == 0 { panSnapshot("pinch.changed") }
 
@@ -311,13 +269,6 @@ class GameViewController: UIViewController {
             clampCameraPosition(scene: scene)
             pinchAnchorScene = nil
 
-            updateCameraOverlay()
-            updateCameraWHLabel()
-            updateDebugOverlays(scene: scene)
-            updateWorldDiagnosticOverlays(scene: scene)
-            #if DEBUG
-            debugAssertViewportInsideBackground(scene, where: "pinch.ended")
-            #endif
             panSnapshot("pinch.ended")
 
         default:
@@ -327,34 +278,34 @@ class GameViewController: UIViewController {
     
     
     
-    private func makeDebugButton(title: String) -> UIButton {
-        let b = UIButton(type: .system)
-        if #available(iOS 15.0, *) {
-            var config = UIButton.Configuration.filled()
-            config.title = title
-            config.baseForegroundColor = .white
-            config.baseBackgroundColor = UIColor.black.withAlphaComponent(0.55)
-            config.cornerStyle = .medium
-            config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
-            b.configuration = config
-            b.titleLabel?.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
-        } else {
-            b.setTitle(title, for: .normal)
-            b.titleLabel?.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
-            b.setTitleColor(.white, for: .normal)
-            b.backgroundColor = UIColor.black.withAlphaComponent(0.55)
-            b.layer.cornerRadius = 6
-            b.contentEdgeInsets = UIEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
-        }
-        return b
-    }
+//    private func makeDebugButton(title: String) -> UIButton {
+//        let b = UIButton(type: .system)
+//        if #available(iOS 15.0, *) {
+//            var config = UIButton.Configuration.filled()
+//            config.title = title
+//            config.baseForegroundColor = .white
+//            config.baseBackgroundColor = UIColor.black.withAlphaComponent(0.55)
+//            config.cornerStyle = .medium
+//            config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
+//            b.configuration = config
+//            b.titleLabel?.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+//        } else {
+//            b.setTitle(title, for: .normal)
+//            b.titleLabel?.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+//            b.setTitleColor(.white, for: .normal)
+//            b.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+//            b.layer.cornerRadius = 6
+//            b.contentEdgeInsets = UIEdgeInsets(top: 6, left: 10, bottom: 6, right: 10)
+//        }
+//        return b
+//    }
 
-    private let DEBUG_OVERLAYS = true
+ //   private let DEBUG_OVERLAYS = true
     // Debug logging for pan/clamp
-    private let DEBUG_PAN_LOGS = true
-    private func dbg(_ text: @autoclosure () -> String) {
-        if DEBUG_PAN_LOGS { print(text()) }
-    }
+//    private let DEBUG_PAN_LOGS = true
+//    private func dbg(_ text: @autoclosure () -> String) {
+//        if DEBUG_PAN_LOGS { print(text()) }
+//    }
 
     
     // MARK: - Fast verification helpers (logging only)
@@ -380,96 +331,96 @@ class GameViewController: UIViewController {
 
     /// Log what `//background` resolves to (class, path), and the rects we clamp to.
     /// Diagnostic only – does not change behavior.
-    private func debugLogBackgroundResolution(scene: GameScene) {
-        guard DEBUG_PAN_LOGS else { return }
-        let world = scene.worldNode
-
-        func rectDescInScene(for node: SKNode) -> String {
-            let parent = node.parent ?? scene
-            let acc = node.calculateAccumulatedFrame()
-            let rS  = rectFromNodeToScene(acc, from: parent, scene: scene)
-            return fmtR(rS)
-        }
-
-        if let w = world {
-            dbg("[BG.RESOLVE] worldNode path=\(nodePath(w, in: scene)) children=\(w.children.count)")
-        } else {
-            dbg("[BG.RESOLVE] worldNode = nil")
-        }
-
-        // Candidate A: `background` under world
-        if let w = world, let bgW = w.childNode(withName: "background") {
-            let cls = String(describing: type(of: bgW))
-            let path = nodePath(bgW, in: scene)
-            let underWorld = isDescendant(bgW, of: w)
-            let acc = bgW.calculateAccumulatedFrame()
-            dbg("[BG.RESOLVE] bgWorld class=\(cls) path=\(path) underWorld=\(underWorld) accW=\(fmtR(acc)) accS=\(rectDescInScene(for: bgW))")
-            if let sp = bgW as? SKSpriteNode {
-                dbg(String(format: "[BG.SPRITE] size=(%.0f×%.0f) anchor=(%.2f,%.2f)", sp.size.width, sp.size.height, sp.anchorPoint.x, sp.anchorPoint.y))
-            }
-        } else {
-            dbg("[BG.RESOLVE] bgWorld (world.childNodeNamed 'background') = nil")
-        }
-
-        // Candidate B: any `//background` in the scene
-        if let bgAny = scene.childNode(withName: "//background") {
-            let cls = String(describing: type(of: bgAny))
-            let path = nodePath(bgAny, in: scene)
-            let acc = bgAny.calculateAccumulatedFrame()
-            dbg("[BG.RESOLVE] bgAny  class=\(cls) path=\(path) acc(parent)=\(fmtR(acc)) accS=\(rectDescInScene(for: bgAny))")
-            if let sp = bgAny as? SKSpriteNode {
-                dbg(String(format: "[BG.SPRITE] any size=(%.0f×%.0f) anchor=(%.2f,%.2f)", sp.size.width, sp.size.height, sp.anchorPoint.x, sp.anchorPoint.y))
-            }
-        } else {
-            dbg("[BG.RESOLVE] bgAny (scene.childNodeNamed '//background') = nil")
-        }
-
-        // What clamp rect are we actually using right now?
-        if let contentW = contentBoundsInWorld(scene), let w = world {
-            let contentS = rectFromNodeToScene(contentW, from: w, scene: scene)
-            dbg("[BG.CLAMP] contentW=\(fmtR(contentW)) contentS=\(fmtR(contentS))")
-        } else {
-            dbg("[BG.CLAMP] contentBoundsInWorld = nil")
-        }
-    }
+//    private func debugLogBackgroundResolution(scene: GameScene) {
+//        guard DEBUG_PAN_LOGS else { return }
+//        let world = scene.worldNode
+//
+//        func rectDescInScene(for node: SKNode) -> String {
+//            let parent = node.parent ?? scene
+//            let acc = node.calculateAccumulatedFrame()
+//            let rS  = rectFromNodeToScene(acc, from: parent, scene: scene)
+//            return fmtR(rS)
+//        }
+//
+//        if let w = world {
+//            dbg("[BG.RESOLVE] worldNode path=\(nodePath(w, in: scene)) children=\(w.children.count)")
+//        } else {
+//            dbg("[BG.RESOLVE] worldNode = nil")
+//        }
+//
+//        // Candidate A: `background` under world
+//        if let w = world, let bgW = w.childNode(withName: "background") {
+//            let cls = String(describing: type(of: bgW))
+//            let path = nodePath(bgW, in: scene)
+//            let underWorld = isDescendant(bgW, of: w)
+//            let acc = bgW.calculateAccumulatedFrame()
+//            dbg("[BG.RESOLVE] bgWorld class=\(cls) path=\(path) underWorld=\(underWorld) accW=\(fmtR(acc)) accS=\(rectDescInScene(for: bgW))")
+//            if let sp = bgW as? SKSpriteNode {
+//                dbg(String(format: "[BG.SPRITE] size=(%.0f×%.0f) anchor=(%.2f,%.2f)", sp.size.width, sp.size.height, sp.anchorPoint.x, sp.anchorPoint.y))
+//            }
+//        } else {
+//            dbg("[BG.RESOLVE] bgWorld (world.childNodeNamed 'background') = nil")
+//        }
+//
+//        // Candidate B: any `//background` in the scene
+//        if let bgAny = scene.childNode(withName: "//background") {
+//            let cls = String(describing: type(of: bgAny))
+//            let path = nodePath(bgAny, in: scene)
+//            let acc = bgAny.calculateAccumulatedFrame()
+//            dbg("[BG.RESOLVE] bgAny  class=\(cls) path=\(path) acc(parent)=\(fmtR(acc)) accS=\(rectDescInScene(for: bgAny))")
+//            if let sp = bgAny as? SKSpriteNode {
+//                dbg(String(format: "[BG.SPRITE] any size=(%.0f×%.0f) anchor=(%.2f,%.2f)", sp.size.width, sp.size.height, sp.anchorPoint.x, sp.anchorPoint.y))
+//            }
+//        } else {
+//            dbg("[BG.RESOLVE] bgAny (scene.childNodeNamed '//background') = nil")
+//        }
+//
+//        // What clamp rect are we actually using right now?
+//        if let contentW = contentBoundsInWorld(scene), let w = world {
+//            let contentS = rectFromNodeToScene(contentW, from: w, scene: scene)
+//            dbg("[BG.CLAMP] contentW=\(fmtR(contentW)) contentS=\(fmtR(contentS))")
+//        } else {
+//            dbg("[BG.CLAMP] contentBoundsInWorld = nil")
+//        }
+//    }
     
     
     
-    // GameViewController.swift
-    private var cornerTL: UILabel?
-    private var cornerTR: UILabel?
-    private var cornerBR: UILabel?
-    private var cornerBL: UILabel?
-    private var cameraWHLabel: UILabel?
+//    // GameViewController.swift
+//    private var cornerTL: UILabel?
+//    private var cornerTR: UILabel?
+//    private var cornerBR: UILabel?
+//    private var cornerBL: UILabel?
+//    private var cameraWHLabel: UILabel?
 
     /// Create/update a HUD label that shows the camera viewport size in scene units.
-    private func updateCameraWHLabel() {
-        guard let skView = self.view as? SKView,
-              let scene = skView.scene as? GameScene,
-              let cam = scene.camera else { return }
-
-        // Create label if missing
-        if cameraWHLabel == nil {
-            let l = UILabel()
-            l.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .medium)
-            l.textColor = .white
-            l.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-            l.textAlignment = .center
-            l.layer.cornerRadius = 6
-            l.layer.masksToBounds = true
-            l.isUserInteractionEnabled = false
-            (self.view as? SKView)?.addSubview(l)
-            cameraWHLabel = l
-        }
-
-        // Compute camera viewport size in SCENE units (resizeFill => 1pt == 1 scene unit pre-camera)
-        let viewSize = skView.bounds.size
-        let camW = viewSize.width  / cam.xScale
-        let camH = viewSize.height / cam.yScale
-
-
-
-    }
+//    private func updateCameraWHLabel() {
+//        guard let skView = self.view as? SKView,
+//              let scene = skView.scene as? GameScene,
+//              let cam = scene.camera else { return }
+//
+//        // Create label if missing
+//        if cameraWHLabel == nil {
+//            let l = UILabel()
+//            l.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .medium)
+//            l.textColor = .white
+//            l.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+//            l.textAlignment = .center
+//            l.layer.cornerRadius = 6
+//            l.layer.masksToBounds = true
+//            l.isUserInteractionEnabled = false
+//            (self.view as? SKView)?.addSubview(l)
+//            cameraWHLabel = l
+//        }
+//
+//        // Compute camera viewport size in SCENE units (resizeFill => 1pt == 1 scene unit pre-camera)
+//        let viewSize = skView.bounds.size
+//        let camW = viewSize.width  / cam.xScale
+//        let camH = viewSize.height / cam.yScale
+//
+//
+//
+//    }
 
 
     /// If a sprite named "maxzoombg" exists anywhere in the scene tree, compute the camera scale
@@ -628,12 +579,12 @@ class GameViewController: UIViewController {
             return l
         }
 
-        if cornerTL == nil { cornerTL = makeLabel(); skView.addSubview(cornerTL!) }
-        if cornerTR == nil { cornerTR = makeLabel(); skView.addSubview(cornerTR!) }
-        if cornerBR == nil { cornerBR = makeLabel(); skView.addSubview(cornerBR!) }
-        if cornerBL == nil { cornerBL = makeLabel(); skView.addSubview(cornerBL!) }
-
-        [cornerTL, cornerTR, cornerBR, cornerBL].compactMap{$0}.forEach { skView.bringSubviewToFront($0) }
+//        if cornerTL == nil { cornerTL = makeLabel(); skView.addSubview(cornerTL!) }
+//        if cornerTR == nil { cornerTR = makeLabel(); skView.addSubview(cornerTR!) }
+//        if cornerBR == nil { cornerBR = makeLabel(); skView.addSubview(cornerBR!) }
+//        if cornerBL == nil { cornerBL = makeLabel(); skView.addSubview(cornerBL!) }
+//
+//        [cornerTL, cornerTR, cornerBR, cornerBL].compactMap{$0}.forEach { skView.bringSubviewToFront($0) }
     }
 
     /// Compute a snug size for a multi-line, non-wrapping label.
@@ -715,98 +666,98 @@ class GameViewController: UIViewController {
         overlay.lineWidth = 1.0
     }
 
-    private func ensureDebugOverlays(in scene: GameScene) {
-        guard DEBUG_OVERLAYS, scene.worldNode != nil, scene.camera != nil else { return }
-        if scene.childNode(withName: "MapBoundsOverlay") == nil {
-            let n = SKShapeNode()
-            n.name = "MapBoundsOverlay"
-            n.strokeColor = .brown
-            n.fillColor = .clear
-            n.zPosition = 90_000
-            n.lineWidth = 2
-            scene.addChild(n)
-        }
-        if scene.camera?.childNode(withName: "CameraOverlay") == nil {
-            updateCameraOverlay()
-        }
-    }
-    
-    // Build debug overlays: background bounds (scene space, matches clamp logic)
-    private func updateDebugOverlays(scene: GameScene) {
-        guard DEBUG_OVERLAYS,
-              (self.view as? SKView) != nil,
-              scene.camera != nil,
-              let world = scene.worldNode,
-              let contentW = contentBoundsInWorld(scene),
-              let mapNode = scene.childNode(withName: "MapBoundsOverlay") as? SKShapeNode
-        else { return }
-
-        // content bounds we clamp against (WORLD → SCENE)
-        let contentS = rectFromNodeToScene(contentW, from: world, scene: scene)
-
-        let p = CGMutablePath()
-        p.addRect(contentS)
-        mapNode.path = p
-
-        // visuals (stroke set in ensureDebugOverlays; harmless to set again)
-        mapNode.strokeColor = .brown
-        mapNode.lineWidth   = 2
-        mapNode.fillColor   = UIColor.systemTeal.withAlphaComponent(0.10)
-        mapNode.blendMode   = .alpha
-    }
-    
+//    private func ensureDebugOverlays(in scene: GameScene) {
+//        guard DEBUG_OVERLAYS, scene.worldNode != nil, scene.camera != nil else { return }
+//        if scene.childNode(withName: "MapBoundsOverlay") == nil {
+//            let n = SKShapeNode()
+//            n.name = "MapBoundsOverlay"
+//            n.strokeColor = .brown
+//            n.fillColor = .clear
+//            n.zPosition = 90_000
+//            n.lineWidth = 2
+//            scene.addChild(n)
+//        }
+//        if scene.camera?.childNode(withName: "CameraOverlay") == nil {
+//            updateCameraOverlay()
+//        }
+//    }
+//    
+//    // Build debug overlays: background bounds (scene space, matches clamp logic)
+//    private func updateDebugOverlays(scene: GameScene) {
+//        guard DEBUG_OVERLAYS,
+//              (self.view as? SKView) != nil,
+//              scene.camera != nil,
+//              let world = scene.worldNode,
+//              let contentW = contentBoundsInWorld(scene),
+//              let mapNode = scene.childNode(withName: "MapBoundsOverlay") as? SKShapeNode
+//        else { return }
+//
+//        // content bounds we clamp against (WORLD → SCENE)
+//        let contentS = rectFromNodeToScene(contentW, from: world, scene: scene)
+//
+//        let p = CGMutablePath()
+//        p.addRect(contentS)
+//        mapNode.path = p
+//
+//        // visuals (stroke set in ensureDebugOverlays; harmless to set again)
+//        mapNode.strokeColor = .brown
+//        mapNode.lineWidth   = 2
+//        mapNode.fillColor   = UIColor.systemTeal.withAlphaComponent(0.10)
+//        mapNode.blendMode   = .alpha
+//    }
+//    
     
     // ===== Diagnostics: World-space overlays =====
 
     /// Ensure world-space debug overlays exist (children of the World node so scale doesn't change line widths).
-    private func ensureWorldDiagnosticOverlays(in scene: GameScene) {
-        guard DEBUG_OVERLAYS, let world = scene.worldNode else { return }
-
-        if world.childNode(withName: "ContentBoundsOverlayW") == nil {
-            let n = SKShapeNode()
-            n.name = "ContentBoundsOverlayW"
-            n.strokeColor = .systemGreen
-            n.fillColor = .clear
-            n.lineWidth = 2
-            n.zPosition = 95_000
-            world.addChild(n)
-        }
-        if world.childNode(withName: "ViewportOverlayW") == nil {
-            let n = SKShapeNode()
-            n.name = "ViewportOverlayW"
-            n.strokeColor = .magenta
-            n.fillColor = .clear
-            n.lineWidth = 2
-            n.zPosition = 96_000
-            world.addChild(n)
-        }
-    }
-
-    /// Update world-space overlays:
-    ///  - Green rect: content bounds (background only)
-    ///  - Magenta rect: camera viewport converted into WORLD coordinates
-    private func updateWorldDiagnosticOverlays(scene: GameScene) {
-        guard DEBUG_OVERLAYS,
-              let skView = self.view as? SKView,
-              let cam = scene.camera,
-              let world = scene.worldNode else { return }
-
-        // Green: content bounds (world space)
-        if let content = contentBoundsInWorld(scene),
-           let contentNode = world.childNode(withName: "ContentBoundsOverlayW") as? SKShapeNode {
-            let p = CGMutablePath()
-            p.addRect(content)
-            contentNode.path = p
-        }
-
-        // Magenta: viewport in world space
-        let vpWorld = viewportRectInWorld(scene, cam: cam, viewSize: skView.bounds.size)
-        if let vpNode = world.childNode(withName: "ViewportOverlayW") as? SKShapeNode {
-            let p = CGMutablePath()
-            p.addRect(vpWorld)
-            vpNode.path = p
-        }
-    }
+//    private func ensureWorldDiagnosticOverlays(in scene: GameScene) {
+//        guard DEBUG_OVERLAYS, let world = scene.worldNode else { return }
+//
+//        if world.childNode(withName: "ContentBoundsOverlayW") == nil {
+//            let n = SKShapeNode()
+//            n.name = "ContentBoundsOverlayW"
+//            n.strokeColor = .systemGreen
+//            n.fillColor = .clear
+//            n.lineWidth = 2
+//            n.zPosition = 95_000
+//            world.addChild(n)
+//        }
+//        if world.childNode(withName: "ViewportOverlayW") == nil {
+//            let n = SKShapeNode()
+//            n.name = "ViewportOverlayW"
+//            n.strokeColor = .magenta
+//            n.fillColor = .clear
+//            n.lineWidth = 2
+//            n.zPosition = 96_000
+//            world.addChild(n)
+//        }
+//    }
+//
+//    /// Update world-space overlays:
+//    ///  - Green rect: content bounds (background only)
+//    ///  - Magenta rect: camera viewport converted into WORLD coordinates
+//    private func updateWorldDiagnosticOverlays(scene: GameScene) {
+//        guard DEBUG_OVERLAYS,
+//              let skView = self.view as? SKView,
+//              let cam = scene.camera,
+//              let world = scene.worldNode else { return }
+//
+//        // Green: content bounds (world space)
+//        if let content = contentBoundsInWorld(scene),
+//           let contentNode = world.childNode(withName: "ContentBoundsOverlayW") as? SKShapeNode {
+//            let p = CGMutablePath()
+//            p.addRect(content)
+//            contentNode.path = p
+//        }
+//
+//        // Magenta: viewport in world space
+//        let vpWorld = viewportRectInWorld(scene, cam: cam, viewSize: skView.bounds.size)
+//        if let vpNode = world.childNode(withName: "ViewportOverlayW") as? SKShapeNode {
+//            let p = CGMutablePath()
+//            p.addRect(vpWorld)
+//            vpNode.path = p
+//        }
+//    }
     
     
     
@@ -838,15 +789,15 @@ class GameViewController: UIViewController {
         setupCornerHUD()
         ensureSceneMatchesView()
         updateCameraOverlay()
-        updateCameraWHLabel()
+//        updateCameraWHLabel()
         updateZoomCaps()
 
-        if let skView = self.view as? SKView, let scene = skView.scene as? GameScene {
-            ensureDebugOverlays(in: scene)
-            updateDebugOverlays(scene: scene)
-            ensureWorldDiagnosticOverlays(in: scene)
-            updateWorldDiagnosticOverlays(scene: scene)
-        }
+//        if let skView = self.view as? SKView, let scene = skView.scene as? GameScene {
+//            ensureDebugOverlays(in: scene)
+//            updateDebugOverlays(scene: scene)
+//            ensureWorldDiagnosticOverlays(in: scene)
+//            updateWorldDiagnosticOverlays(scene: scene)
+//        }
         
         // in viewDidAppear
         if let skv = self.view as? SKView {
@@ -872,44 +823,26 @@ class GameViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         ensureSceneMatchesView()
-        updateCameraOverlay()
-        updateCameraWHLabel()
+ //       updateCameraOverlay()
+ //       updateCameraWHLabel()
         updateZoomCaps()
-        if let skView = self.view as? SKView, let scene = skView.scene as? GameScene {
-            updateDebugOverlays(scene: scene)
-            updateWorldDiagnosticOverlays(scene: scene)
-        }
-        if let panel = debugPanel, let skView = self.view as? SKView { skView.bringSubviewToFront(panel) }
+//        if let skView = self.view as? SKView, let scene = skView.scene as? GameScene {
+//            updateDebugOverlays(scene: scene)
+//            updateWorldDiagnosticOverlays(scene: scene)
+//        }
     }
 
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
         updateCameraOverlay()
-        updateCameraWHLabel()
+ //       updateCameraWHLabel()
         updateZoomCaps()
-        if let skView = self.view as? SKView, let scene = skView.scene as? GameScene {
-            updateDebugOverlays(scene: scene)
-            updateWorldDiagnosticOverlays(scene: scene)
-        }
-        if let panel = debugPanel, let skView = self.view as? SKView { skView.bringSubviewToFront(panel) }
+//        if let skView = self.view as? SKView, let scene = skView.scene as? GameScene {
+//            updateDebugOverlays(scene: scene)
+//            updateWorldDiagnosticOverlays(scene: scene)
+//        }
     }
 
-    /// Log a one-line snapshot of view size (pts), camera scale, and background clamp rect (WORLD units).
-    private func logZoomSnapshot(_ tag: String, scene: GameScene) {
-        guard let skView = self.view as? SKView,
-              let cam = scene.camera else { return }
-        let viewSize = skView.bounds.size
-        let viewW = Int(viewSize.width)
-        let viewH = Int(viewSize.height)
-        let scaleStr = String(format: "%.4f", cam.xScale)
-        if let bg = contentBoundsInWorld(scene) {
-            let bgW = Int(bg.width.rounded())
-            let bgH = Int(bg.height.rounded())
-            print("[\(tag) SNAP] view=\(viewW)x\(viewH)  scale=\(scaleStr)  bgW=\(bgW)x\(bgH)")
-        } else {
-            print("[\(tag) SNAP] view=\(viewW)x\(viewH)  scale=\(scaleStr)  bgW=nil")
-        }
-    }
     
     
 
@@ -960,7 +893,6 @@ class GameViewController: UIViewController {
 
         // We REQUIRE the clamping surface to be a child of World.
         guard let bg = world.childNode(withName: "background") else {
-            assertionFailure("Expected a node named `background` under `World` for clamping.")
             return nil
         }
 
@@ -985,34 +917,6 @@ class GameViewController: UIViewController {
     
     
 
-    // Tiny toast helper
-    private func showToast(_ text: String) {
-        guard let skView = self.view as? SKView else { return }
-        let l = UILabel()
-        l.text = text
-        l.font = .monospacedSystemFont(ofSize: 12, weight: .medium)
-        l.textColor = .white
-        l.backgroundColor = UIColor.black.withAlphaComponent(0.75)
-        l.textAlignment = .center
-        l.numberOfLines = 1
-        l.layer.cornerRadius = 8
-        l.layer.masksToBounds = true
-        l.alpha = 0
-        l.translatesAutoresizingMaskIntoConstraints = false
-        skView.addSubview(l)
-        NSLayoutConstraint.activate([
-            l.centerXAnchor.constraint(equalTo: skView.centerXAnchor),
-            l.bottomAnchor.constraint(equalTo: skView.bottomAnchor, constant: -(skView.safeAreaInsets.bottom + 60)),
-            l.widthAnchor.constraint(greaterThanOrEqualToConstant: 220),
-            l.heightAnchor.constraint(equalToConstant: 32)
-        ])
-        skView.bringSubviewToFront(l)
-        UIView.animate(withDuration: 0.18, animations: { l.alpha = 1 }) { _ in
-            UIView.animate(withDuration: 0.18, delay: 1.0, options: [], animations: { l.alpha = 0 }) { _ in
-                l.removeFromSuperview()
-            }
-        }
-    }
 
     /// Center the camera over the content bounds used for clamping, converting to scene space before centering.
     private func centerCameraOnBackground(scene: GameScene) {
@@ -1088,11 +992,6 @@ class GameViewController: UIViewController {
         world.position = oldPos
         let corrected = CGPoint(x: proposed.x - dW.x, y: proposed.y - dW.y)
 
-        if DEBUG_PAN_LOGS {
-            func f(_ v: CGFloat) -> String { String(format: "%.2f", v) }
-            print("[ABS CLAMP (scene)] proposed=(\(f(proposed.x)),\(f(proposed.y))) → (\(f(corrected.x)),\(f(corrected.y))) " +
-                  "vpS=\(fmtR(vpS)) clampS=\(fmtR(bgS)) overs(L:\(f(overL)) R:\(f(overR)) B:\(f(overB)) T:\(f(overT)))")
-        }
 
         return corrected
     }
@@ -1236,11 +1135,6 @@ class GameViewController: UIViewController {
         if didWarnViewportOnce { return }
 
         let vpW = viewportRectInWorld(scene, cam: cam, viewSize: skView.bounds.size)
-        let outside = (vpW.minX < base.minX) || (vpW.maxX > base.maxX) || (vpW.minY < base.minY) || (vpW.maxY > base.maxY)
-        if outside {
-            didWarnViewportOnce = true
-            print("❗️ASSERT(OOB content \(tag)): viewport=\(vpW)  background=\(base)")
-        }
     }
 }
 
