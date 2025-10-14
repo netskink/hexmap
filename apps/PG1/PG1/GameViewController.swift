@@ -182,7 +182,6 @@ class GameViewController: UIViewController {
             
             updateCameraOverlay()
             updateCameraWHLabel()
-            updateCameraScaleLabel()
             updateDebugOverlays(scene: scene)
             updateWorldDiagnosticOverlays(scene: scene)
             
@@ -223,7 +222,6 @@ class GameViewController: UIViewController {
             // Refresh overlays/HUD and assert
             updateCameraOverlay()
             updateCameraWHLabel()
-            updateCameraScaleLabel()
             updateDebugOverlays(scene: scene)
             updateWorldDiagnosticOverlays(scene: scene)
             #if DEBUG
@@ -300,7 +298,6 @@ class GameViewController: UIViewController {
             // HUD/diagnostics
             updateCameraOverlay()
             updateCameraWHLabel()
-            updateCameraScaleLabel()
             updateDebugOverlays(scene: scene)
             updateWorldDiagnosticOverlays(scene: scene)
             #if DEBUG
@@ -316,7 +313,6 @@ class GameViewController: UIViewController {
 
             updateCameraOverlay()
             updateCameraWHLabel()
-            updateCameraScaleLabel()
             updateDebugOverlays(scene: scene)
             updateWorldDiagnosticOverlays(scene: scene)
             #if DEBUG
@@ -471,76 +467,10 @@ class GameViewController: UIViewController {
         let camW = viewSize.width  / cam.xScale
         let camH = viewSize.height / cam.yScale
 
-        // Update text
-        cameraWHLabel?.text = String(format: "camera %.0f×%.0f (scene units)", camW, camH)
 
-        // Size label and position it at the top-center inside the safe area
-        cameraWHLabel?.sizeToFit()
-        let padX: CGFloat = 12
-        let padY: CGFloat = 6
-        if var f = cameraWHLabel?.frame {
-            f.size.width  += padX
-            f.size.height += padY
-            let inset = skView.safeAreaInsets
-            let x = (viewSize.width - f.size.width) * 0.5
-            let y = inset.top + 8
-            f.origin = CGPoint(x: x, y: y)
-            cameraWHLabel?.frame = f
-        }
 
-        // Keep above SpriteKit content
-        if let l = cameraWHLabel { skView.bringSubviewToFront(l) }
-
-        // Update the camera scale label as well
-        updateCameraScaleLabel()
     }
 
-    /// Create/update a HUD label that shows the camera's current xScale and yScale.
-    private func updateCameraScaleLabel() {
-        guard let skView = self.view as? SKView,
-              let scene = skView.scene as? GameScene,
-              let cam = scene.camera else { return }
-
-        // Create label if missing
-        if cameraScaleLabel == nil {
-            let l = UILabel()
-            l.font = UIFont.monospacedSystemFont(ofSize: 12, weight: .medium)
-            l.textColor = .white
-            l.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-            l.textAlignment = .center
-            l.layer.cornerRadius = 6
-            l.layer.masksToBounds = true
-            l.isUserInteractionEnabled = false
-            (self.view as? SKView)?.addSubview(l)
-            cameraScaleLabel = l
-        }
-
-        // Compute camera scale
-        let xScale = cam.xScale
-        let yScale = cam.yScale
-        cameraScaleLabel?.text = String(format: "scale: x=%.3f y=%.3f", xScale, yScale)
-
-        // Size label and position it below the cameraWHLabel (centered horizontally, below top safe area)
-        cameraScaleLabel?.sizeToFit()
-        let padX: CGFloat = 12
-        let padY: CGFloat = 6
-        if var f = cameraScaleLabel?.frame {
-            f.size.width  += padX
-            f.size.height += padY
-            let inset = skView.safeAreaInsets
-            let viewSize = skView.bounds.size
-            let x = (viewSize.width - f.size.width) * 0.5
-            // Position just below cameraWHLabel if present, else just below top safe area
-            var y: CGFloat = inset.top + 8
-            if let whLabel = cameraWHLabel {
-                y = whLabel.frame.maxY + 4
-            }
-            f.origin = CGPoint(x: x, y: y)
-            cameraScaleLabel?.frame = f
-        }
-        // Keep above SpriteKit content
-        if let l = cameraScaleLabel { skView.bringSubviewToFront(l) }
-    }
 
     /// If a sprite named "maxzoombg" exists anywhere in the scene tree, compute the camera scale
     /// that would render it 1:1 in view points (i.e., one node point maps to one screen point).
@@ -703,7 +633,6 @@ class GameViewController: UIViewController {
         if cornerBR == nil { cornerBR = makeLabel(); skView.addSubview(cornerBR!) }
         if cornerBL == nil { cornerBL = makeLabel(); skView.addSubview(cornerBL!) }
 
-        updateCornerHUD()
         [cornerTL, cornerTR, cornerBR, cornerBL].compactMap{$0}.forEach { skView.bringSubviewToFront($0) }
     }
 
@@ -901,120 +830,8 @@ class GameViewController: UIViewController {
         sceneTR = tr
         sceneBR = br
         sceneBL = bl
-        updateCornerHUD()
     }
 
-    // This computes w,h from the SKView’s bounds (UIKit coords), sets the label text to
-    // those screen coordinates, and positions labels inside the safe area with a small margin.
-    private func updateCornerHUD() {
-        guard let skView = self.view as? SKView,
-              let tl = cornerTL, let tr = cornerTR, let br = cornerBR, let bl = cornerBL
-        else { return }
-
-        let size = skView.bounds.size
-        let w = size.width
-        let h = size.height
-
-        // Convert the latest scene-corner points to UIKit view coordinates (for third line)
-        var tlSceneInView = CGPoint.zero
-        var trSceneInView = CGPoint.zero
-        var brSceneInView = CGPoint.zero
-        var blSceneInView = CGPoint.zero
-        if let scene = (self.view as? SKView)?.scene {
-            tlSceneInView = scene.convertPoint(toView: sceneTL)
-            trSceneInView = scene.convertPoint(toView: sceneTR)
-            brSceneInView = scene.convertPoint(toView: sceneBR)
-            blSceneInView = scene.convertPoint(toView: sceneBL)
-        }
-
-        // Camera viewport corners in scene -> then to view coords (should match the view corners)
-        var tlCamInView = CGPoint.zero
-        var trCamInView = CGPoint.zero
-        var brCamInView = CGPoint.zero
-        var blCamInView = CGPoint.zero
-        // Camera viewport corners in scene coordinates
-        var tlCamWorld = CGPoint.zero
-        var trCamWorld = CGPoint.zero
-        var brCamWorld = CGPoint.zero
-        var blCamWorld = CGPoint.zero
-
-        if let scene = (self.view as? SKView)?.scene as? GameScene, let cam = scene.camera {
-            let halfW = (w * 0.5) / cam.xScale
-            let halfH = (h * 0.5) / cam.yScale
-           // Camera pos in SCENE coordinates
-           let camPosS: CGPoint = {
-               if let parent = cam.parent, parent !== scene {
-                   return scene.convert(cam.position, from: parent)
-               } else {
-                   return cam.position
-               }
-           }()
-           let tlCamScene = CGPoint(x: camPosS.x - halfW, y: camPosS.y + halfH)
-           let trCamScene = CGPoint(x: camPosS.x + halfW, y: camPosS.y + halfH)
-           let brCamScene = CGPoint(x: camPosS.x + halfW, y: camPosS.y - halfH)
-           let blCamScene = CGPoint(x: camPosS.x - halfW, y: camPosS.y - halfH)
-            // Convert to worldNode coordinates
-            if let world = scene.worldNode {
-                tlCamWorld = world.convert(tlCamScene, from: scene)
-                trCamWorld = world.convert(trCamScene, from: scene)
-                brCamWorld = world.convert(brCamScene, from: scene)
-                blCamWorld = world.convert(blCamScene, from: scene)
-            }
-            tlCamInView = scene.convertPoint(toView: tlCamScene)
-            trCamInView = scene.convertPoint(toView: trCamScene)
-            brCamInView = scene.convertPoint(toView: brCamScene)
-            blCamInView = scene.convertPoint(toView: blCamScene)
-        }
-
-        tl.attributedText = makeCornerLabelText(
-            viewLine: String(format: "TL (0, 0) view"),
-            sceneLine: String(format: "(%.1f, %.1f) scene", sceneTL.x, sceneTL.y),
-            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", tlSceneInView.x, tlSceneInView.y),
-            camViewLine: String(format: "(%.1f, %.1f) cam→view", tlCamInView.x, tlCamInView.y),
-            camWorldLine: String(format: "(%.1f, %.1f) cam→world", tlCamWorld.x, tlCamWorld.y))
-
-        tr.attributedText = makeCornerLabelText(
-            viewLine: String(format: "TR (%.0f, 0) view", w),
-            sceneLine: String(format: "(%.1f, %.1f) scene", sceneTR.x, sceneTR.y),
-            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", trSceneInView.x, trSceneInView.y),
-            camViewLine: String(format: "(%.1f, %.1f) cam→view", trCamInView.x, trCamInView.y),
-            camWorldLine: String(format: "(%.1f, %.1f) cam→world", trCamWorld.x, trCamWorld.y))
-
-        br.attributedText = makeCornerLabelText(
-            viewLine: String(format: "BR (%.0f, %.0f) view", w, h),
-            sceneLine: String(format: "(%.1f, %.1f) scene", sceneBR.x, sceneBR.y),
-            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", brSceneInView.x, brSceneInView.y),
-            camViewLine: String(format: "(%.1f, %.1f) cam→view", brCamInView.x, brCamInView.y),
-            camWorldLine: String(format: "(%.1f, %.1f) cam→world", brCamWorld.x, brCamWorld.y))
-
-        bl.attributedText = makeCornerLabelText(
-            viewLine: String(format: "BL (0, %.0f) view", h),
-            sceneLine: String(format: "(%.1f, %.1f) scene", sceneBL.x, sceneBL.y),
-            sceneViewLine: String(format: "(%.1f, %.1f) scene→view", blSceneInView.x, blSceneInView.y),
-            camViewLine: String(format: "(%.1f, %.1f) cam→view", blCamInView.x, blCamInView.y),
-            camWorldLine: String(format: "(%.1f, %.1f) cam→world", blCamWorld.x, blCamWorld.y))
-
-        // Resize to fit the longest line exactly (no wrapping)
-        tl.frame.size = sizeForMultilineLabel(text: tl.attributedText?.string ?? "", font: tl.font)
-        tr.frame.size = sizeForMultilineLabel(text: tr.attributedText?.string ?? "", font: tr.font)
-        br.frame.size = sizeForMultilineLabel(text: br.attributedText?.string ?? "", font: br.font)
-        bl.frame.size = sizeForMultilineLabel(text: bl.attributedText?.string ?? "", font: bl.font)
-
-        // Position at safe-area corners (unchanged)
-        let inset = skView.safeAreaInsets
-        let margin: CGFloat = 8
-
-        tl.frame.origin = CGPoint(x: inset.left + margin,
-                                  y: inset.top + margin)
-        tr.frame.origin = CGPoint(x: w - inset.right - margin - tr.frame.width,
-                                  y: inset.top + margin)
-        br.frame.origin = CGPoint(x: w - inset.right - margin - br.frame.width,
-                                  y: h - inset.bottom - margin - br.frame.height)
-        bl.frame.origin = CGPoint(x: inset.left + margin,
-                                  y: h - inset.bottom - margin - bl.frame.height)
-
-        [tl, tr, br, bl].forEach { skView.bringSubviewToFront($0) }
-    }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
@@ -1055,7 +872,6 @@ class GameViewController: UIViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         ensureSceneMatchesView()
-        updateCornerHUD()
         updateCameraOverlay()
         updateCameraWHLabel()
         updateZoomCaps()
@@ -1068,7 +884,6 @@ class GameViewController: UIViewController {
 
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
-        updateCornerHUD()
         updateCameraOverlay()
         updateCameraWHLabel()
         updateZoomCaps()
