@@ -4,14 +4,24 @@ import CoreGraphics
 
 class GameViewController: UIViewController {
 
-    // One-time assertion flag to avoid log spam
-    private var didWarnViewportOnce = false
+    
+    // Cached max-in cap and max-out (fit-by-height) cap
+    private var cachedMaxInScale: CGFloat = .greatestFiniteMagnitude
+    private var cachedMaxOutScale: CGFloat = .greatestFiniteMagnitude
+
+    private weak var skViewRef: SKView!
+    private weak var sceneRef: GameScene!
+    private weak var worldRef: SKNode!
+    private weak var bgRef: SKNode!
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { [.landscapeLeft, .landscapeRight] }
+    override var prefersStatusBarHidden: Bool { true }
+
+    
     // MARK: - Pan state
     private var panAnchorScene: CGPoint?
     private var panStartCamPosS: CGPoint?
     
-    // --- Pan Debug Kit (no behavior changes) ---
-    private var panTick = 0
     
     // MARK: - Pinch state
     private var pinchStartScale: CGFloat = 1.0
@@ -24,32 +34,9 @@ class GameViewController: UIViewController {
     private let defaultStopInsetsPts = UIEdgeInsets(top: 1, left: 1, bottom: 1, right: 1)
     
 
-    private func fmt(_ p: CGPoint) -> String { String(format: "(%.2f,%.2f)", p.x, p.y) }
-    private func fmtR(_ r: CGRect) -> String { String(format: "(x:%.2f y:%.2f w:%.2f h:%.2f)", r.origin.x, r.origin.y, r.size.width, r.size.height) }
 
    
 
-    /// Calibrate stopInsetsPts (screen pts) for the *current* scale so TL/TR/TOP/BOT cam→world stop values
-    /// match your desired targets (WORLD coords). Pass nil to use the content edge for a side.
-    private func calibrateStopsForCurrentScale(scene: GameScene,
-                                               cam: SKCameraNode,
-                                               desiredTLX: CGFloat?,
-                                               desiredTRX: CGFloat?,
-                                               desiredTopY: CGFloat?,
-                                               desiredBottomY: CGFloat?) {
-        guard let base = contentBoundsInWorld(scene) else { stopInsetsPts = .zero; return }
-        var insets = UIEdgeInsets.zero
-        // Left: TL.x ≥ desiredTLX  → inset = (desiredTLX - base.minX) WORLD → convert to pts
-        if let tlx = desiredTLX { insets.left   = max(0, tlx - base.minX) * cam.xScale }
-        // Right: TR.x ≤ desiredTRX → inset = (base.maxX - desiredTRX) WORLD → convert to pts
-        if let trx = desiredTRX { insets.right  = max(0, base.maxX - trx) * cam.xScale }
-        // Top:   TL.y ≤ desiredTopY → inset = (base.maxY - desiredTopY) WORLD → convert to pts
-        if let ty  = desiredTopY { insets.top    = max(0, base.maxY - ty) * cam.yScale }
-        // Bottom: BL.y ≥ desiredBottomY → inset = (desiredBottomY - base.minY) WORLD → convert to pts
-        if let by  = desiredBottomY { insets.bottom = max(0, by - base.minY) * cam.yScale }
-        stopInsetsPts = insets
-    }
-    
     
     
     /// One-finger pan: drag the World container defined in GameScene.sks (stable at any zoom).
@@ -61,9 +48,7 @@ class GameViewController: UIViewController {
 
         switch sender.state {
         case .began:
-            if let cam = scene.camera, let bg = contentBoundsInWorld(scene) {
-                let vp = viewportRectInScene(scene, cam: cam, viewSize: skView.bounds.size)
-            }
+
             // Anchor the finger in scene space and remember the camera's starting position (scene coords).
             panAnchorScene   = scene.convertPoint(fromView: sender.location(in: skView))
             if let cam = scene.camera {
@@ -100,10 +85,6 @@ class GameViewController: UIViewController {
                 cam.position = correctedS
             }
 
-
-
-            
-            panTick &+= 1
 
         case .ended, .cancelled, .failed:
             // Clear anchors
@@ -177,7 +158,6 @@ class GameViewController: UIViewController {
                 cam.position = proposedS
             }
 
-            panTick &+= 1
 
         case .ended, .cancelled, .failed:
             // Hard stop inside bounds and clear anchor
@@ -193,17 +173,6 @@ class GameViewController: UIViewController {
     
 
     
-    // MARK: - Fast verification helpers (logging only)
-    private func nodePath(_ node: SKNode, in scene: SKScene) -> String {
-        var parts: [String] = []
-        var n: SKNode? = node
-        while let cur = n, cur !== scene {
-            parts.append(cur.name ?? String(describing: type(of: cur)))
-            n = cur.parent
-        }
-        parts.append(scene.name ?? "scene")
-        return parts.reversed().joined(separator: "/")
-    }
 
     private func isDescendant(_ node: SKNode, of ancestor: SKNode) -> Bool {
         var n: SKNode? = node
@@ -237,10 +206,7 @@ class GameViewController: UIViewController {
         return max(nodeScale ?? 0.0001, 0.0001)
     }
 
-    // Cached max-in cap and max-out (fit-by-height) cap
-    private var cachedMaxInScale: CGFloat = .greatestFiniteMagnitude
-    private var cachedMaxOutScale: CGFloat = .greatestFiniteMagnitude
-
+    
     /// Fit scale (zoom-out cap) so the entire background height is visible.
     private func computeFitScaleHeight(for skView: SKView, scene: GameScene) -> CGFloat {
         guard let rect = backgroundBoundsInScene(scene) else { return 1.0 }
@@ -260,11 +226,6 @@ class GameViewController: UIViewController {
         cachedMaxOutScale = computeFitScaleHeight(for: skView, scene: scene)
     }
 
-
-    private var sceneTL: CGPoint = .zero
-    private var sceneTR: CGPoint = .zero
-    private var sceneBR: CGPoint = .zero
-    private var sceneBL: CGPoint = .zero
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -316,56 +277,13 @@ class GameViewController: UIViewController {
         
     }
     
-    private weak var skViewRef: SKView!
-    private weak var sceneRef: GameScene!
-    private weak var worldRef: SKNode!
-    private weak var bgRef: SKNode!
-
-    private func wireSceneRefs() {
-        guard let skv = view as? SKView,
-              let scn = skv.scene as? GameScene,
-              let world = scn.childNode(withName: "World"),
-              let bg = scn.childNode(withName: "//background")
-                
-                
-        else { return }
-
-        // inside wireSceneRefs(), after `let world = scn.childNode(withName: "World")`
-        assert(world.xScale == 1 && world.yScale == 1 && world.zRotation == 0,
-           "World node must remain unscaled/unrotated for panning/clamping to work correctly.")
-
-        // in wireSceneRefs()
-        assert(bg.parent === world || isDescendant(bg, of: world),
-               "`background` must be under `World` so it moves with the content.")
-        
-        
-        skViewRef = skv
-        sceneRef  = scn
-        worldRef  = world
-        bgRef     = bg
-
-        scn.scaleMode = .resizeFill
-        scn.backgroundColor = .green   // keep for diagnostics until you’re happy
-    }
     
     
-    override var supportedInterfaceOrientations: UIInterfaceOrientationMask { [.landscapeLeft, .landscapeRight] }
-    override var prefersStatusBarHidden: Bool { true }
     
     
 
-    /// Compute a snug size for a multi-line, non-wrapping label.
-    private func sizeForMultilineLabel(text: String, font: UIFont, padding: CGSize = CGSize(width: 12, height: 6)) -> CGSize {
-        let lines = text.components(separatedBy: "\n")
-        var maxWidth: CGFloat = 0
-        for line in lines {
-            let w = (line as NSString).size(withAttributes: [.font: font]).width
-            if w > maxWidth { maxWidth = w }
-        }
-        let height = font.lineHeight * CGFloat(max(1, lines.count)) + padding.height
-        return CGSize(width: maxWidth + padding.width, height: height)
-    }
 
+    
     private func makeCornerLabelText(viewLine: String, sceneLine: String, sceneViewLine: String, camViewLine: String, camWorldLine: String) -> NSAttributedString {
         let fullText = viewLine + "\n" + sceneLine + "\n" + sceneViewLine + "\n" + camViewLine + "\n" + camWorldLine
         let attr = NSMutableAttributedString(string: fullText)
@@ -444,18 +362,6 @@ class GameViewController: UIViewController {
         }
     }
 
-    @objc private func handleWorldCorners(_ note: Notification) {
-        guard let tl = (note.userInfo?["tl"] as? NSValue)?.cgPointValue,
-              let tr = (note.userInfo?["tr"] as? NSValue)?.cgPointValue,
-              let br = (note.userInfo?["br"] as? NSValue)?.cgPointValue,
-              let bl = (note.userInfo?["bl"] as? NSValue)?.cgPointValue else {
-            return
-        }
-        sceneTL = tl
-        sceneTR = tr
-        sceneBR = br
-        sceneBL = bl
-    }
 
 
     override func viewDidAppear(_ animated: Bool) {
@@ -474,12 +380,7 @@ class GameViewController: UIViewController {
         if let win = view.window { print("Window.bounds =", win.bounds) }
         (self.view as? SKView)?.backgroundColor = .yellow
         
-        wireSceneRefs()
 
-        NotificationCenter.default.addObserver(self,
-                selector: #selector(handleWorldCorners(_:)),
-                name: .worldCornersDidUpdate,
-                object: nil)
     }
 
     deinit {
@@ -573,83 +474,7 @@ class GameViewController: UIViewController {
     
 
 
-    /// Center the camera over the content bounds used for clamping, converting to scene space before centering.
-    private func centerCameraOnBackground(scene: GameScene) {
-        guard let camera = scene.camera,
-              let world  = scene.worldNode,
-              let contentW = self.contentBoundsInWorld(scene) else { return }
 
-        // Convert WORLD → SCENE to compute the center in scene space
-        let contentS = rectFromNodeToScene(contentW, from: world, scene: scene)
-        let centerS = CGPoint(x: contentS.midX, y: contentS.midY)
-
-        if let parent = camera.parent, parent !== scene {
-            camera.position = parent.convert(centerS, from: scene)
-        } else {
-            camera.position = centerS
-        }
-    }
-
-
-    private func clampWorldNode(scene: GameScene) {
-        guard let world = scene.worldNode else { return }
-        world.position = correctedWorldPosition(scene: scene, proposed: world.position)
-    }
-    
-    
-    
-    
-    // In GameViewController.swift
-    private func correctedWorldPosition(scene: GameScene, proposed: CGPoint) -> CGPoint {
-        guard let skView = self.view as? SKView,
-              let cam = scene.camera,
-              let world = scene.worldNode,
-              let bgS_raw = backgroundBoundsInScene(scene) else {
-            return proposed
-        }
-
-        // Convert optional guard insets (screen pts) → SCENE units for current camera scale
-        let insetL = stopInsetsPts.left   / max(cam.xScale, 0.0001)
-        let insetR = stopInsetsPts.right  / max(cam.xScale, 0.0001)
-        let insetB = stopInsetsPts.bottom / max(cam.yScale, 0.0001)
-        let insetT = stopInsetsPts.top    / max(cam.yScale, 0.0001)
-
-        // Shrink the background rect in SCENE space
-        let bgS = CGRect(
-            x: bgS_raw.minX + insetL,
-            y: bgS_raw.minY + insetB,
-            width:  max(0, bgS_raw.width  - insetL - insetR),
-            height: max(0, bgS_raw.height - insetT - insetB)
-        )
-
-        // Evaluate the viewport **in SCENE coordinates** at the proposed world position
-        // Temporarily apply the proposed world position to compute the correct viewport
-        let oldPos = world.position
-        world.position = proposed
-        let vpS = viewportRectInScene(scene, cam: cam, viewSize: skView.bounds.size)
-
-        // Overshoot amounts in SCENE space (positive => viewport has crossed that edge)
-        let overL = bgS.minX - vpS.minX
-        let overR = vpS.maxX - bgS.maxX
-        let overB = bgS.minY - vpS.minY
-        let overT = vpS.maxY - bgS.maxY
-
-        // Scene-space delta required to bring the viewport back inside the clamp rect
-        let dxS = max(0, overL) - max(0, overR)
-        let dyS = max(0, overB) - max(0, overT)
-
-        // Convert SCENE delta → WORLD delta. Moving the world by −dW applies +dxS/+dyS to the viewport.
-        let p0W = world.convert(CoreGraphics.CGPoint.zero, from: scene)
-        let p1W = world.convert(CGPoint(x: dxS, y: dyS), from: scene)
-        let dW  = CGPoint(x: p1W.x - p0W.x, y: p1W.y - p0W.y)
-
-        // Restore and return corrected world position
-        world.position = oldPos
-        let corrected = CGPoint(x: proposed.x - dW.x, y: proposed.y - dW.y)
-
-
-        return corrected
-    }
     
 
     private func viewportRectInScene(_ scene: GameScene, cam: SKCameraNode, viewSize: CGSize) -> CGRect {
@@ -698,87 +523,6 @@ class GameViewController: UIViewController {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
-    /// Viewport rect in WORLD space, by converting scene corners into worldNode coords
-    private func viewportRectInWorld(_ scene: GameScene, cam: SKCameraNode, viewSize: CGSize) -> CGRect {
-        let rS = viewportRectInScene(scene, cam: cam, viewSize: viewSize)
-        guard let world = scene.worldNode else { return .zero }
-
-        // Always convert the 4 corners SCENE → WORLD for correctness across parents/transforms.
-        let blW = world.convert(CGPoint(x: rS.minX, y: rS.minY), from: scene)
-        let brW = world.convert(CGPoint(x: rS.maxX, y: rS.minY), from: scene)
-        let tlW = world.convert(CGPoint(x: rS.minX, y: rS.maxY), from: scene)
-        let trW = world.convert(CGPoint(x: rS.maxX, y: rS.maxY), from: scene)
-        let minX = min(blW.x, brW.x, tlW.x, trW.x)
-        let maxX = max(blW.x, brW.x, tlW.x, trW.x)
-        let minY = min(blW.y, brW.y, tlW.y, trW.y)
-        let maxY = max(blW.y, brW.y, tlW.y, trW.y)
-        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-    }
-    
-    
-    /// Camera viewport corner points in WORLD coordinates (matches HUD math).
-    private func viewportCornersInWorld(_ scene: GameScene, cam: SKCameraNode, viewSize: CGSize) -> (tl: CGPoint, tr: CGPoint, br: CGPoint, bl: CGPoint) {
-        let halfW = viewSize.width  / (2.0 * cam.xScale)
-        let halfH = viewSize.height / (2.0 * cam.yScale)
-
-        // Camera position in SCENE coordinates (camera may be parented)
-        let camPosS: CGPoint = {
-            if let parent = cam.parent, parent !== scene {
-                return scene.convert(cam.position, from: parent)
-            } else {
-                return cam.position
-            }
-        }()
-
-        let tlS = CGPoint(x: camPosS.x - halfW, y: camPosS.y + halfH)
-        let trS = CGPoint(x: camPosS.x + halfW, y: camPosS.y + halfH)
-        let brS = CGPoint(x: camPosS.x + halfW, y: camPosS.y - halfH)
-        let blS = CGPoint(x: camPosS.x - halfW, y: camPosS.y - halfH)
-
-        guard let world = scene.worldNode else { return (.zero, .zero, .zero, .zero) }
-
-        // Fast path: world is pure translation
-        if world.zRotation == 0, world.xScale == 1, world.yScale == 1 {
-            let ox = world.position.x, oy = world.position.y
-            return (
-                tl: CGPoint(x: tlS.x - ox, y: tlS.y - oy),
-                tr: CGPoint(x: trS.x - ox, y: trS.y - oy),
-                br: CGPoint(x: brS.x - ox, y: brS.y - oy),
-                bl: CGPoint(x: blS.x - ox, y: blS.y - oy)
-            )
-        }
-
-        // Fallback for non-identity transforms
-        return (
-            tl: world.convert(tlS, from: scene),
-            tr: world.convert(trS, from: scene),
-            br: world.convert(brS, from: scene),
-            bl: world.convert(blS, from: scene)
-        )
-    }
-    
-    
-    private func allowedWorldPositionRange(scene: GameScene,
-                                           cam: SKCameraNode,
-                                           viewSize: CGSize,
-                                           bgW: CGRect) -> (minX: CGFloat, maxX: CGFloat, minY: CGFloat, maxY: CGFloat) {
-        // Compute the viewport rect in SCENE space
-        let vpS = viewportRectInScene(scene, cam: cam, viewSize: viewSize)
-
-        // IMPORTANT:
-        // Do NOT convert bgW (WORLD) into scene space here. If you do, the bounds will
-        // include world.position, causing the min/max to drift with the very value we are clamping.
-        // The correct fixed range derives from:
-        //   world.x ≥ vpS.maxX - bgW.maxX
-        //   world.x ≤ vpS.minX - bgW.minX
-        // and similarly for Y.
-        let minX = vpS.maxX - bgW.maxX
-        let maxX = vpS.minX - bgW.minX
-        let minY = vpS.maxY - bgW.maxY
-        let maxY = vpS.minY - bgW.minY
-        return (minX, maxX, minY, maxY)
-    }
-    
     
     
     /// Background-only OOB assert
