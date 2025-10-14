@@ -9,10 +9,6 @@ class GameViewController: UIViewController {
     private var cachedMaxInScale: CGFloat = .greatestFiniteMagnitude
     private var cachedMaxOutScale: CGFloat = .greatestFiniteMagnitude
 
-    private weak var skViewRef: SKView!
-    private weak var sceneRef: GameScene!
-    private weak var worldRef: SKNode!
-    private weak var bgRef: SKNode!
 
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { [.landscapeLeft, .landscapeRight] }
     override var prefersStatusBarHidden: Bool { true }
@@ -44,7 +40,6 @@ class GameViewController: UIViewController {
         guard let skView = self.view as? SKView,
               let scene  = skView.scene as? GameScene else { return }
 
-        guard let world = scene.worldNode else { return } // World container from GameScene.sks
 
         switch sender.state {
         case .began:
@@ -61,7 +56,6 @@ class GameViewController: UIViewController {
                 }()
                 panStartCamPosS = camPosS
             }
-            world.removeAction(forKey: "panFling")
 
         case .changed:
             guard let anchor = panAnchorScene,
@@ -91,7 +85,6 @@ class GameViewController: UIViewController {
             defer { panAnchorScene = nil; panStartCamPosS = nil }
 
             // Stop any in-flight pan animation and hard-clamp immediately.
-            world.removeAction(forKey: "panFling")
             clampCameraPosition(scene: scene)
             return
 
@@ -174,14 +167,6 @@ class GameViewController: UIViewController {
 
     
 
-    private func isDescendant(_ node: SKNode, of ancestor: SKNode) -> Bool {
-        var n: SKNode? = node
-        while let cur = n {
-            if cur === ancestor { return true }
-            n = cur.parent
-        }
-        return false
-    }
 
 
 
@@ -201,7 +186,7 @@ class GameViewController: UIViewController {
     }
 
     /// Max zoom-in scale: enforce 1:1 for `maxzoombg` if present; otherwise allow deep zoom with a tiny floor.
-    private func computeMaxInScale(for skView: SKView, scene: GameScene) -> CGFloat {
+    private func computeMaxInScale(scene: GameScene) -> CGFloat {
         let nodeScale = maxInScaleFromMaxZoomBG(in: scene)
         return max(nodeScale ?? 0.0001, 0.0001)
     }
@@ -222,7 +207,7 @@ class GameViewController: UIViewController {
     private func updateZoomCaps() {
         guard let skView = self.view as? SKView,
               let scene  = skView.scene as? GameScene else { return }
-        cachedMaxInScale  = computeMaxInScale(for: skView, scene: scene)
+        cachedMaxInScale  = computeMaxInScale(scene: scene)
         cachedMaxOutScale = computeFitScaleHeight(for: skView, scene: scene)
     }
 
@@ -284,72 +269,7 @@ class GameViewController: UIViewController {
 
 
     
-    private func makeCornerLabelText(viewLine: String, sceneLine: String, sceneViewLine: String, camViewLine: String, camWorldLine: String) -> NSAttributedString {
-        let fullText = viewLine + "\n" + sceneLine + "\n" + sceneViewLine + "\n" + camViewLine + "\n" + camWorldLine
-        let attr = NSMutableAttributedString(string: fullText)
-        let font = UIFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
 
-        // line 1 (view) - white
-        let viewRange = NSRange(location: 0, length: (viewLine as NSString).length)
-        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.white], range: viewRange)
-
-        // line 2 (scene) - teal
-        let sceneRange = NSRange(location: viewRange.location + viewRange.length + 1, length: (sceneLine as NSString).length)
-        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.systemTeal], range: sceneRange)
-
-        // line 3 (scene→view) - white
-        let sceneViewRange = NSRange(location: sceneRange.location + sceneRange.length + 1, length: (sceneViewLine as NSString).length)
-        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.white], range: sceneViewRange)
-
-        // line 4 (cam→view) - red
-        let camViewRange = NSRange(location: sceneViewRange.location + sceneViewRange.length + 1, length: (camViewLine as NSString).length)
-        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.systemRed], range: camViewRange)
-
-        // line 5 (cam→world) - orange
-        let camWorldRange = NSRange(location: camViewRange.location + camViewRange.length + 1, length: (camWorldLine as NSString).length)
-        attr.addAttributes([.font: font, .paragraphStyle: paragraph, .foregroundColor: UIColor.systemOrange], range: camWorldRange)
-
-        return attr
-    }
-
-    /// Draw/refresh a red rectangle that matches the camera's visible area.
-    /// The rectangle is added as a child of the camera so it follows pan automatically.
-    private func updateCameraOverlay() {
-        guard let skView = self.view as? SKView,
-              let scene = skView.scene as? GameScene,
-              let cam = scene.camera else { return }
-
-        // Camera child nodes live in *camera space* (screen points). Do not divide by camera scale.
-        // Draw the overlay exactly the size of the visible view so it always hugs the screen.
-        let viewSize = skView.bounds.size
-        let halfW = viewSize.width  * 0.5
-        let halfH = viewSize.height * 0.5
-        let rect = CGRect(x: -halfW, y: -halfH, width: viewSize.width, height: viewSize.height)
-
-        // Reuse or create overlay node under the camera
-        let name = "CameraOverlay"
-        let overlay: SKShapeNode
-        if let existing = cam.childNode(withName: name) as? SKShapeNode {
-            overlay = existing
-        } else {
-            overlay = SKShapeNode()
-            overlay.name = name
-            overlay.fillColor = .clear
-            overlay.strokeColor = .systemRed
-            overlay.lineJoin = .miter
-            overlay.zPosition = 100_000
-            cam.addChild(overlay)
-        }
-
-        // Update path and keep ~1pt line width on screen regardless of zoom
-        let path = CGMutablePath()
-        path.addRect(rect)
-        overlay.path = path
-        // Constant 1-pt line regardless of zoom because this node is in camera space
-        overlay.lineWidth = 1.0
-    }
 
     
     
@@ -367,25 +287,9 @@ class GameViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         ensureSceneMatchesView()
-        updateCameraOverlay()
         updateZoomCaps()
-
-        
-        // in viewDidAppear
-        if let skv = self.view as? SKView {
-            print("SKView.bounds =", skv.bounds)
-        } else {
-            print("⚠️ self.view is a \(type(of: self.view)) (not SKView)")
-        }
-        if let win = view.window { print("Window.bounds =", win.bounds) }
-        (self.view as? SKView)?.backgroundColor = .yellow
-        
-
     }
 
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
@@ -395,7 +299,6 @@ class GameViewController: UIViewController {
 
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
-        updateCameraOverlay()
         updateZoomCaps()
     }
 
@@ -415,18 +318,6 @@ class GameViewController: UIViewController {
         return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
-    /// Convert a rect defined in scene coordinates into the target node's coordinate space.
-    private func rectFromSceneToNode(_ rect: CGRect, to: SKNode, scene: SKScene) -> CGRect {
-        let bl = to.convert(CGPoint(x: rect.minX, y: rect.minY), from: scene)
-        let br = to.convert(CGPoint(x: rect.maxX, y: rect.minY), from: scene)
-        let tl = to.convert(CGPoint(x: rect.minX, y: rect.maxY), from: scene)
-        let tr = to.convert(CGPoint(x: rect.maxX, y: rect.maxY), from: scene)
-        let minX = min(bl.x, br.x, tl.x, tr.x)
-        let maxX = max(bl.x, br.x, tl.x, tr.x)
-        let minY = min(bl.y, br.y, tl.y, tr.y)
-        let maxY = max(bl.y, br.y, tl.y, tr.y)
-        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-    }
 
     /// Background bounds in **scene** coordinates. Returns nil if not present.
     private func backgroundBoundsInScene(_ scene: GameScene) -> CGRect? {
@@ -442,56 +333,8 @@ class GameViewController: UIViewController {
         return nil
     }
 
-    /// Background bounds expressed in worldNode coordinates. Prefers a child named "background" under worldNode.
-    // Replace your backgroundBoundsInWorld(_:) with this strict version.
-    private func backgroundBoundsInWorld(_ scene: GameScene) -> CGRect? {
-        guard let world = scene.worldNode else { return nil }
-
-        // We REQUIRE the clamping surface to be a child of World.
-        guard let bg = world.childNode(withName: "background") else {
-            return nil
-        }
-
-        // Use the accumulated frame in WORLD space (bg is already under World).
-        let r = bg.calculateAccumulatedFrame()
-        return (r.isNull || r.width <= 0 || r.height <= 0) ? nil : r
-    }
-
-    /// Union two rects; if one is `.null`, return the other.
-    private func unionRect(_ a: CGRect, _ b: CGRect) -> CGRect {
-        if a.isNull { return b }
-        if b.isNull { return a }
-        return a.union(b)
-    }
-
-    private func contentBoundsInWorld(_ scene: GameScene) -> CGRect? {
-        // Clamp STRICTLY to the background sprite, per project design.
-        return backgroundBoundsInWorld(scene)
-    }
-    
-    
-    
     
 
-
-
-    
-
-    private func viewportRectInScene(_ scene: GameScene, cam: SKCameraNode, viewSize: CGSize) -> CGRect {
-        let halfW = viewSize.width  / (2.0 * cam.xScale)
-        let halfH = viewSize.height / (2.0 * cam.yScale)
-   
-       // Camera pos in SCENE coordinates (camera may be parented under another node)
-       let camPosS: CGPoint
-       if let parent = cam.parent, parent !== scene {
-           camPosS = scene.convert(cam.position, from: parent)
-       } else {
-           camPosS = cam.position
-       }
-       return CGRect(x: camPosS.x - halfW,
-                     y: camPosS.y - halfH,
-                     width: halfW * 2, height: halfH * 2)
-    }
 
     // Compute the viewport rectangle in SCENE coordinates for a *proposed* camera center (scene coords).
     // This is exact because it converts the four camera-space corners using the camera node’s transform.
