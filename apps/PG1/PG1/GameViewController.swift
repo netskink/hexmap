@@ -586,37 +586,6 @@ class GameViewController: UIViewController {
         cachedMaxOutScale = computeFitScaleHeight(for: skView, scene: scene)
     }
 
-    private func ensureDebugPanel() {
-        guard debugPanel == nil, let skView = self.view as? SKView else { return }
-
-        let panel = UIStackView()
-        panel.axis = .horizontal
-        panel.spacing = 8
-        panel.alignment = .center
-        panel.distribution = .fill
-        panel.isLayoutMarginsRelativeArrangement = true
-        panel.layoutMargins = UIEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
-        panel.backgroundColor = UIColor.black.withAlphaComponent(0.35)
-        panel.layer.cornerRadius = 8
-        panel.translatesAutoresizingMaskIntoConstraints = false
-
-        let minBtn = makeDebugButton(title: "min")
-        minBtn.addTarget(self, action: #selector(handleMinTap), for: .touchUpInside)
-        let midBtn = makeDebugButton(title: "mid")
-        midBtn.addTarget(self, action: #selector(handleMidTap), for: .touchUpInside)
-
-        panel.addArrangedSubview(minBtn)
-        panel.addArrangedSubview(midBtn)
-
-        skView.addSubview(panel)
-        NSLayoutConstraint.activate([
-            panel.centerXAnchor.constraint(equalTo: skView.centerXAnchor),
-            panel.bottomAnchor.constraint(equalTo: skView.safeAreaLayoutGuide.bottomAnchor, constant: -12)
-        ])
-
-        self.debugPanel = panel
-        skView.bringSubviewToFront(panel)
-    }
 
     private var sceneTL: CGPoint = .zero
     private var sceneTR: CGPoint = .zero
@@ -1053,7 +1022,6 @@ class GameViewController: UIViewController {
         ensureSceneMatchesView()
         updateCameraOverlay()
         updateCameraWHLabel()
-        ensureDebugPanel()
         updateZoomCaps()
 
         if let skView = self.view as? SKView, let scene = skView.scene as? GameScene {
@@ -1091,7 +1059,6 @@ class GameViewController: UIViewController {
         updateCameraOverlay()
         updateCameraWHLabel()
         updateZoomCaps()
-        ensureDebugPanel()
         if let skView = self.view as? SKView, let scene = skView.scene as? GameScene {
             updateDebugOverlays(scene: scene)
             updateWorldDiagnosticOverlays(scene: scene)
@@ -1105,7 +1072,6 @@ class GameViewController: UIViewController {
         updateCameraOverlay()
         updateCameraWHLabel()
         updateZoomCaps()
-        ensureDebugPanel()
         if let skView = self.view as? SKView, let scene = skView.scene as? GameScene {
             updateDebugOverlays(scene: scene)
             updateWorldDiagnosticOverlays(scene: scene)
@@ -1250,40 +1216,6 @@ class GameViewController: UIViewController {
         }
     }
 
-    @objc private func handleMinTap() {
-        guard let skView = self.view as? SKView,
-              let scene = skView.scene as? GameScene,
-              let camera = scene.camera,
-              backgroundBoundsInScene(scene) != nil else {
-            showToast("min unavailable: background not ready")
-            return
-        }
-
-        // Ensure caps are current, then use the same cap the pinch uses for zoom-out.
-        updateZoomCaps()
-        let fitScale = cachedMaxOutScale
-        let viewW = max(skView.bounds.width, 1)
-        let viewH = max(skView.bounds.height, 1)
-        camera.setScale(fitScale)
-        camera.yScale = camera.xScale
-        
-        // At full-map view, zero is fine, but you can also keep the guard:
-        stopInsetsPts = defaultStopInsetsPts
-        
-        // Center, clamp and refresh overlays/HUD
-        centerCameraOnBackground(scene: scene)
-        clampCameraPosition(scene: scene)
-        updateCameraOverlay()
-        updateCameraWHLabel()
-        updateCameraScaleLabel()
-        updateDebugOverlays(scene: scene)
-
-        logZoomSnapshot("MIN", scene: scene)
-        
-        panSnapshot("min.after")
-        
-        showToast("min: full map visible")
-    }
 
     private func clampWorldNode(scene: GameScene) {
         guard let world = scene.worldNode else { return }
@@ -1350,35 +1282,6 @@ class GameViewController: UIViewController {
         return corrected
     }
     
-    /// Mid Zoom: set scale to midpoint between min and max caps
-    @objc private func handleMidTap() {
-        guard let skView = self.view as? SKView,
-              let scene = skView.scene as? GameScene,
-              let camera = scene.camera else { return }
-        // ensure caps are up to date
-        updateZoomCaps()
-        let mid = (cachedMaxInScale + cachedMaxOutScale) * 0.5
-        camera.setScale(mid);
-        camera.yScale = camera.xScale
-        
-        // <<< important
-        stopInsetsPts = defaultStopInsetsPts
-
-        // Start mid zoom centered on the background
-        centerCameraOnBackground(scene: scene)
-        // keep current center; just clamp to bounds
-        clampCameraPosition(scene: scene)
-        updateCameraOverlay()
-        updateCameraWHLabel()
-        updateCameraScaleLabel()
-        updateDebugOverlays(scene: scene)
-        logZoomSnapshot("MID", scene: scene)
-        if let bg = contentBoundsInWorld(scene) { let vp = viewportRectInScene(scene, cam: camera, viewSize: skView.bounds.size); print(String(format:"[RANGE MID] x=[%.2f,%.2f] y=[%.2f,%.2f]", vp.maxX - bg.maxX, vp.minX - bg.minX, vp.maxY - bg.maxY, vp.minY - bg.minY)) }
-        showToast(String(format: "mid: scale=%.3f", mid))
-        
-        panSnapshot("mid.after")
-        debugLogBackgroundResolution(scene: scene)
-    }
 
     private func viewportRectInScene(_ scene: GameScene, cam: SKCameraNode, viewSize: CGSize) -> CGRect {
         let halfW = viewSize.width  / (2.0 * cam.xScale)
