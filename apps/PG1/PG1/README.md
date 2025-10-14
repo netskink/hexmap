@@ -97,3 +97,59 @@ graph TD
   GS --> M11["moveUnit(_:toCol:row:completion:)"]
   ```
   
+## regarding screens and scenes
+  
+```  
+  xcode scene
+  -------------------------------------------
+  scene:              width, height:    1334, 750
+  tile map:           col, rows:        30,   15
+  tile size:          width, height:    128,  111 (110.851)
+    cols*tile width                     3840
+    half size width                     1920
+    rows*tile height                    1665
+    half size height                    832.5
+  
+  iphone 16 pro
+  ------------------------------------------
+  view:               width, height:    874, 402
+  scene->view
+  on start            width, height:    1392.1, 765.1
+
+  With view such that upper left corner of map is aligned
+  to upper left:
+  tl corner view      width, height:    -0.8, 0.8
+  br corner view      width, height:    1909.5, 1128.9
+  
+  
+  With view such that lower right corner of map is aligned
+  to lower right:
+  tl corner view      width, height:    -1035.7, -725.8
+  br corner view      width, height:    874.6, 402.3
+
+  
+  iphone 14
+  ------------------------------------------
+  view:               width, height:    852, 393
+  scene->view
+  on start            width, height:    1357.1, 746.4
+  
+  With view such that upper left corner of map is aligned
+  to upper left:
+  tl corner view      width, height:    -1.2, -0.6
+  br corner view      width, height:    1863.1, 1100.4
+  
+  
+  With view such that lower right corner of map is aligned
+  to lower right:
+  tl corner view      width, height:    -1009.7, -705.1
+  br corner view      width, height:    852.5, 394.7
+  
+```
+
+Quick recap of why this holds the map perfectly:
+    •    We compute the exact viewport for the proposed camera center in scene space and clamp against the background (also in scene space).
+    •    If the viewport is larger than the map on an axis, we pin to the map’s center on that axis.
+    •    A tiny inward epsilon prevents rounding slivers that used to reveal the green.
+
+

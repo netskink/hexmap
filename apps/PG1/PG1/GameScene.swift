@@ -4,7 +4,13 @@
 //
 
 import SpriteKit
-import GameplayKit
+
+
+
+extension Notification.Name {
+    static let worldCornersDidUpdate = Notification.Name("WorldCornersDidUpdate")
+}
+
 
 /// Side currently taking a turn.
 enum Turn { case player, computer }
@@ -22,11 +28,17 @@ class GameScene: SKScene {
 
     /// Root container for all world content (map, units, overlays).
     /// Apply panning/zooming to this node so the scene camera stays fixed.
-    var worldNode: SKNode!
+    // Container for all gameplay content defined in GameScene.sks
+    @IBOutlet weak var worldNode: SKNode!
 
     /// The flat-top hex tile map (from GameScene.sks → World/BaseMap).
     /// Used for coordinate transforms, neighbor queries, and pathing.
     var baseMap: SKTileMapNode!
+    
+    // The red background node
+    var backGroundNode: SKNode!
+    // The red background node
+    var maxzoombgNode: SKNode!
 
     // Units
     /// Player unit sprite (assigned in `addUnit`).
@@ -63,34 +75,81 @@ class GameScene: SKScene {
     /// - Spawns the example units at offset coordinates.
     /// - Enables player input to begin the turn loop.
     override func didMove(to view: SKView) {
-        guard let world = childNode(withName: "//World") else { fatalError("Missing //World") }
-        worldNode = world
-        guard let map = worldNode.childNode(withName: "BaseMap") as? SKTileMapNode else { fatalError("Missing BaseMap") }
+        
+        
+        super.didMove(to: view)
+
+        
+        
+        // Find World (keep your fallback)
+        if worldNode == nil { worldNode = childNode(withName: "World") }
+        precondition(worldNode != nil, "GameScene.sks must contain a node named 'World'")
+
+        // Helper: recursive lookup under World, else anywhere in the scene
+        func findNode<T: SKNode>(_ name: String, as type: T.Type) -> T? {
+            (worldNode.childNode(withName: name) as? T) ??
+            (childNode(withName: "//" + name) as? T)
+        }
+
+        guard let map = findNode("BaseMap", as: SKTileMapNode.self) else {
+            fatalError("Missing BaseMap (expected SKTileMapNode)")
+        }
         baseMap = map
 
-        // Draw red box around map area
-        let mapSize = baseMap.mapSize
-        //let frameBox = SKShapeNode(rectOf: mapSize)
-        //frameBox.strokeColor = .green
-        //frameBox.lineWidth = 2
-        //frameBox.zPosition = 9999 // Higher than units and highlights
-        //frameBox.position = .zero // Align to BaseMap center
-        //worldNode.addChild(frameBox)
+        guard let background = findNode("background", as: SKNode.self) else {
+            fatalError("Missing background")
+        }
+        backGroundNode = background
+
+        guard let maxzoombg = findNode("maxzoombg", as: SKNode.self) else {
+            fatalError("Missing maxzoombg")
+        }
+        maxzoombgNode = maxzoombg
+
+
+        // Find the camera in GameScene.sks
+        if let cameraNode = childNode(withName: "Camera") as? SKCameraNode {
+            self.camera = cameraNode
+        }
+    
         
-        drawFrameBox(mapSize: mapSize, in: self)
         
         overlayNode = worldNode.childNode(withName: "Overlay") ?? {
             let n = SKNode(); n.name = "Overlay"; n.zPosition = 1000; worldNode.addChild(n); return n
         }()
 
+        
+        
         // Example starting positions (OFFSET indices)
         addUnit(asset: "infantry",       nodeName: "blueUnit", tint: .blue, atRow: 7,  column: 10)
         addUnit(asset: "mechanizedinf",  nodeName: "redUnit",  tint: .red,  atRow: 13, column: 13)
         
         currentTurn = .player
         enablePlayerInput(true)
+
     }
 
+    
+    // MARK: - Scene update cycle
+
+    /// Called after all actions have been evaluated in the scene.
+    /// Prints the worldNode's corners in scene space after each update cycle.
+    override func didEvaluateActions() {
+        super.didEvaluateActions()
+        if let corners = worldNode?.accumulatedCorners(in: self) {
+            NotificationCenter.default.post(name: .worldCornersDidUpdate,
+                                            object: self,
+                                            userInfo: [
+                                                "tl": NSValue(cgPoint: corners.tl),
+                                                "tr": NSValue(cgPoint: corners.tr),
+                                                "br": NSValue(cgPoint: corners.br),
+                                                "bl": NSValue(cgPoint: corners.bl)
+                                            ])
+        }
+    }
+
+    
+    
     // MARK: - Add units
 
     /// Creates a sprite from `Assets.xcassets` and places it on the map.
@@ -203,7 +262,7 @@ class GameScene: SKScene {
             .filter { baseMap.isWalkable(col: $0.col, row: $0.row) }
 
         for n in options {
-            let hint = SKSpriteNode(texture: SKTexture(imageNamed: "whitebe"))
+            let hint = SKSpriteNode(texture: SKTexture(imageNamed: highlightTextureName))
             hint.name = "moveHint"
             hint.alpha = 0.85
             // Place hint at tile center (map → world).
