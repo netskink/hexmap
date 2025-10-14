@@ -604,12 +604,9 @@ class GameViewController: UIViewController {
         minBtn.addTarget(self, action: #selector(handleMinTap), for: .touchUpInside)
         let midBtn = makeDebugButton(title: "mid")
         midBtn.addTarget(self, action: #selector(handleMidTap), for: .touchUpInside)
-        let maxBtn = makeDebugButton(title: "max")
-        maxBtn.addTarget(self, action: #selector(handleMaxTap), for: .touchUpInside)
 
         panel.addArrangedSubview(minBtn)
         panel.addArrangedSubview(midBtn)
-        panel.addArrangedSubview(maxBtn)
 
         skView.addSubview(panel)
         NSLayoutConstraint.activate([
@@ -1134,34 +1131,6 @@ class GameViewController: UIViewController {
     }
     
     
-    /// Max: jump directly to the strictest zoom-in cap at current center.
-    @objc private func handleMaxTap() {
-        guard let skView = self.view as? SKView,
-              let scene = skView.scene as? GameScene,
-              let camera = scene.camera else { return }
-        updateZoomCaps()
-        camera.setScale(cachedMaxInScale)
-        camera.yScale = camera.xScale
-        calibrateStopsForCurrentScale(scene: scene,
-                                     cam: camera,
-                                     desiredTLX: desiredStopsForMax.tlX,
-                                     desiredTRX: desiredStopsForMax.trX,
-                                     desiredTopY: desiredStopsForMax.topY,
-                                     desiredBottomY: desiredStopsForMax.bottomY)
-        
-        // <<< important (or keep your per-side calibration if you like)
-        //stopInsetsPts = defaultStopInsetsPts
-        
-        clampCameraPosition(scene: scene)
-        updateCameraOverlay()
-        updateCameraWHLabel()
-        updateCameraScaleLabel()
-        updateDebugOverlays(scene: scene)
-        logZoomSnapshot("MAX", scene: scene)
-        
-        panSnapshot("max.after")
-        debugLogBackgroundResolution(scene: scene)
-    }
 
     /// Convert a rect defined in `from` node's coordinate space into the scene's coordinate space.
     private func rectFromNodeToScene(_ rect: CGRect, from: SKNode, scene: SKScene) -> CGRect {
