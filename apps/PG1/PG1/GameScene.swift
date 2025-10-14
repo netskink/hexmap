@@ -4,7 +4,7 @@
 //
 
 import SpriteKit
-import GameplayKit
+
 
 
 extension Notification.Name {
@@ -106,9 +106,6 @@ class GameScene: SKScene {
         }
         maxzoombgNode = maxzoombg
 
-        // Optional: sanity prints
-        print("BaseMap type:", type(of: baseMap))            // should be SKTileMapNode
-        print("BaseMap path OK:", baseMap.name ?? "<nil>")
 
         // Find the camera in GameScene.sks
         if let cameraNode = childNode(withName: "Camera") as? SKCameraNode {
@@ -116,22 +113,12 @@ class GameScene: SKScene {
         }
     
         
-        // temp to set background to black
-        //let cover = SKSpriteNode(color: .black, size: CGSize(width: 10_000, height: 10_000))
-        //cover.zPosition = -10_000
-        //cover.name = "bgCover"
-        //worldNode?.addChild(cover)
         
         overlayNode = worldNode.childNode(withName: "Overlay") ?? {
             let n = SKNode(); n.name = "Overlay"; n.zPosition = 1000; worldNode.addChild(n); return n
         }()
 
         
-        // Draw a debug red line around the worldNode - a union of all children
-        drawFrameBox(theNode: worldNode, in: self)
-        // Draw a debug yellow line around the worldNode - a union of all children
-        drawFrameBox(theNode: background, in: self, color: .yellow)
-
         
         // Example starting positions (OFFSET indices)
         addUnit(asset: "infantry",       nodeName: "blueUnit", tint: .blue, atRow: 7,  column: 10)
@@ -139,15 +126,6 @@ class GameScene: SKScene {
         
         currentTurn = .player
         enablePlayerInput(true)
-        
-        
-        if let sceneCorners = worldNode.accumulatedCorners(in: self) {
-            print("Scene-space corners:",
-                  "TL:", sceneCorners.tl,
-                  "TR:", sceneCorners.tr,
-                  "BR:", sceneCorners.br,
-                  "BL:", sceneCorners.bl)
-        }
 
     }
 
@@ -284,7 +262,7 @@ class GameScene: SKScene {
             .filter { baseMap.isWalkable(col: $0.col, row: $0.row) }
 
         for n in options {
-            let hint = SKSpriteNode(texture: SKTexture(imageNamed: "whitebe"))
+            let hint = SKSpriteNode(texture: SKTexture(imageNamed: highlightTextureName))
             hint.name = "moveHint"
             hint.alpha = 0.85
             // Place hint at tile center (map → world).
