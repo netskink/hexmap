@@ -56,29 +56,51 @@ class GameViewController: UIViewController {
                 }()
                 panStartCamPosS = camPosS
             }
+            stopInsetsPts = defaultStopInsetsPts
 
         case .changed:
-            guard let anchor = panAnchorScene,
-                  let startS = panStartCamPosS,
-                  let cam    = scene.camera else { return }
-
-            // Current finger in scene space
-            let nowScene = scene.convertPoint(fromView: sender.location(in: skView))
-
-            // Delta since gesture began (anchor-based) in SCENE space
-            let deltaS = CGPoint(x: nowScene.x - anchor.x, y: nowScene.y - anchor.y)
-
-            // Proposed camera position in SCENE space (drag-right ⇒ camera moves left).
-            let proposedS = CGPoint(x: startS.x - deltaS.x, y: startS.y - deltaS.y)
-
-            // Clamp camera in SCENE space, then set camera.position (convert back if needed).
-            let correctedS = correctedCameraPosition(scene: scene, proposed: proposedS)
-            if let parent = cam.parent, parent !== scene {
-                cam.position = parent.convert(correctedS, from: scene)
-            } else {
-                cam.position = correctedS
+            guard let cam = scene.camera else { return }
+            
+            // cancel pan if second finger appears
+            if sender.numberOfTouches > 1 {
+                sender.setTranslation(.zero, in: skView)
+                return
             }
 
+            // Use incremental translation in VIEW points, convert to SCENE units via camera scale,
+            // and reset the recognizer each frame. This avoids anchor drift and edge jitter.
+            let t = sender.translation(in: skView) // in screen points
+            if t == .zero { return }
+
+            // Convert view-point delta → scene-space delta using current camera scale
+            let dxS = t.x * cam.xScale
+            let dyS = t.y * cam.yScale
+
+            // Current camera position in SCENE space
+            let camPosS: CGPoint = {
+                if let parent = cam.parent, parent !== scene {
+                    return scene.convert(cam.position, from: parent)
+                } else {
+                    return cam.position
+                }
+            }()
+
+            // Finger-right should move the camera-left. UIKit Y increases downward in view points,
+            // so to make the content follow the finger vertically we ADD dyS.
+            var proposedS = CGPoint(x: camPosS.x - dxS, y: camPosS.y + dyS)
+
+            // Clamp to the background bounds in SCENE space
+            proposedS = correctedCameraPosition(scene: scene, proposed: proposedS)
+
+            // Apply back in the camera's parent space
+            if let parent = cam.parent, parent !== scene {
+                cam.position = parent.convert(proposedS, from: scene)
+            } else {
+                cam.position = proposedS
+            }
+
+            // Reset so next callback gives an incremental delta from here
+            sender.setTranslation(.zero, in: skView)
 
         case .ended, .cancelled, .failed:
             // Clear anchors
@@ -239,9 +261,14 @@ class GameViewController: UIViewController {
         // Optional debug knobs
         skView.ignoresSiblingOrder = true
         skView.preferredFramesPerSecond = 60
+        
+        skView.isMultipleTouchEnabled = true
 
         // 5) Present
         skView.presentScene(scene)
+        
+        // recompute zoom caps once the scene is on screen
+        DispatchQueue.main.async { [weak self] in self?.updateZoomCaps() }
 
         // 6) Log to verify you’re in the right world
         print("✅ Presented GameScene.sks as GameScene; SKView.bounds =", skView.bounds)
@@ -256,9 +283,11 @@ class GameViewController: UIViewController {
         
         
         // pinch recognizer setup
-        let pinchRecognizer = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch(_:)))
+        let pinchRecognizer = UIPinchGestureRecognizer(target: self,
+                                              action: #selector(handlePinch(_:)))
         view.addGestureRecognizer(pinchRecognizer)
         pinchRecognizer.cancelsTouchesInView = false
+        
         
     }
     
@@ -336,37 +365,6 @@ class GameViewController: UIViewController {
     
 
 
-    // Compute the viewport rectangle in SCENE coordinates for a *proposed* camera center (scene coords).
-    // This is exact because it converts the four camera-space corners using the camera node’s transform.
-    private func viewportRectInScene(scene: GameScene,
-                                     cam: SKCameraNode,
-                                     viewSize: CGSize,
-                                     proposedScenePos: CGPoint) -> CGRect {
-        // Save/restore the camera's position in its parent's coordinate space
-        let parent = cam.parent ?? scene
-        let oldPos = cam.position
-        let proposedInParent = parent.convert(proposedScenePos, from: scene)
-        cam.position = proposedInParent
-
-        // Corners in camera space are in screen points; convert to SCENE space
-        let hw = viewSize.width * 0.5
-        let hh = viewSize.height * 0.5
-        let tl = scene.convert(CGPoint(x: -hw, y:  hh), from: cam)
-        let tr = scene.convert(CGPoint(x:  hw, y:  hh), from: cam)
-        let br = scene.convert(CGPoint(x:  hw, y: -hh), from: cam)
-        let bl = scene.convert(CGPoint(x: -hw, y: -hh), from: cam)
-
-        // Restore
-        cam.position = oldPos
-
-        let minX = min(tl.x, tr.x, br.x, bl.x)
-        let maxX = max(tl.x, tr.x, br.x, bl.x)
-        let minY = min(tl.y, tr.y, br.y, bl.y)
-        let maxY = max(tl.y, tr.y, br.y, bl.y)
-        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
-    }
-
-    
     
     /// Background-only OOB assert
 }
@@ -375,20 +373,19 @@ class GameViewController: UIViewController {
 extension GameViewController {
     // Clamp camera position in scene space (for camera-drag panning)
     private func correctedCameraPosition(scene: GameScene, proposed: CGPoint) -> CGPoint {
-        // Clamp entirely in SCENE space against the background rect expressed in SCENE coords.
         guard let skView = self.view as? SKView,
               let cam = scene.camera,
               let bgS_raw = backgroundBoundsInScene(scene) else {
             return proposed
         }
 
-        // Convert optional guard insets (screen pts) → SCENE units (per current camera scale)
-        let insetL = stopInsetsPts.left   / max(cam.xScale, 0.0001)
-        let insetR = stopInsetsPts.right  / max(cam.xScale, 0.0001)
-        let insetB = stopInsetsPts.bottom / max(cam.yScale, 0.0001)
-        let insetT = stopInsetsPts.top    / max(cam.yScale, 0.0001)
+        // Convert guard insets (screen points) → scene units using current camera scale
+        let insetL = stopInsetsPts.left   / max(cam.xScale,  0.0001)
+        let insetR = stopInsetsPts.right  / max(cam.xScale,  0.0001)
+        let insetB = stopInsetsPts.bottom / max(cam.yScale,  0.0001)
+        let insetT = stopInsetsPts.top    / max(cam.yScale,  0.0001)
 
-        // Shrink clamp rect a bit to avoid any rounding sliver at the edges
+        // Background rect, slightly shrunk by insets to avoid edge slivers
         let bgS = CGRect(
             x: bgS_raw.minX + insetL,
             y: bgS_raw.minY + insetB,
@@ -396,51 +393,52 @@ extension GameViewController {
             height: max(0, bgS_raw.height - insetT - insetB)
         )
 
-        let viewSize = skView.bounds.size
+        // Half-size of the viewport in SCENE units.
+        // (SpriteKit: visible size in scene units = view size in points * camera scale)
+        let halfW = (skView.bounds.width  * 0.5) * cam.xScale
+        let halfH = (skView.bounds.height * 0.5) * cam.yScale
 
-        // Exact viewport for the *proposed* camera position
-        let vpS = viewportRectInScene(scene: scene, cam: cam, viewSize: viewSize, proposedScenePos: proposed)
+        var x = proposed.x
+        var y = proposed.y
 
-        // If viewport is larger than the background on an axis, lock to center on that axis
-        var corrected = proposed
-        if vpS.width > bgS.width { corrected.x = bgS.midX }
-        if vpS.height > bgS.height { corrected.y = bgS.midY }
+        // If the viewport is larger than the background on an axis, lock to the center on that axis.
+        if (2 * halfW) >= bgS.width {
+            x = bgS.midX
+        } else {
+            let minX = bgS.minX + halfW
+            let maxX = bgS.maxX - halfW
+            x = min(max(x, minX), maxX)
+        }
 
-        // Recompute viewport if we changed either axis
-        let vpForDelta = (corrected == proposed)
-            ? vpS
-            : viewportRectInScene(scene: scene, cam: cam, viewSize: viewSize, proposedScenePos: corrected)
+        if (2 * halfH) >= bgS.height {
+            y = bgS.midY
+        } else {
+            let minY = bgS.minY + halfH
+            let maxY = bgS.maxY - halfH
+            y = min(max(y, minY), maxY)
+        }
 
-        // Overshoot amounts in SCENE space (positive => viewport crossed that edge)
-        let overL = bgS.minX - vpForDelta.minX
-        let overR = vpForDelta.maxX - bgS.maxX
-        let overB = bgS.minY - vpForDelta.minY
-        let overT = vpForDelta.maxY - bgS.maxY
-
-        // Nudge the camera back inside. For camera moves, overshoot and correction have the same sign.
-        let eps: CGFloat = 0.25 // inward bias (scene units) to guarantee inside after rounding
-        let dx = max(0, overL) - max(0, overR)
-        let dy = max(0, overB) - max(0, overT)
-        corrected.x += (dx == 0 ? 0 : (dx > 0 ? (dx + eps) : (dx - eps)))
-        corrected.y += (dy == 0 ? 0 : (dy > 0 ? (dy + eps) : (dy - eps)))
-
-        return corrected
+        return CGPoint(x: x, y: y)
     }
 
     // Clamp camera to background bounds (for camera-drag panning)
     private func clampCameraPosition(scene: GameScene) {
         guard let cam = scene.camera else { return }
-        let corrected = correctedCameraPosition(scene: scene, proposed: {
+
+        let currentInScene: CGPoint = {
             if let parent = cam.parent, parent !== scene {
                 return scene.convert(cam.position, from: parent)
             } else {
                 return cam.position
             }
-        }())
+        }()
+
+        let clamped = correctedCameraPosition(scene: scene, proposed: currentInScene)
+
         if let parent = cam.parent, parent !== scene {
-            cam.position = parent.convert(corrected, from: scene)
+            cam.position = parent.convert(clamped, from: scene)
         } else {
-            cam.position = corrected
+            cam.position = clamped
         }
     }
 }
