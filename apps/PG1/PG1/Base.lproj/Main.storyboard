@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="24128" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="BV1-FR-VrT">
-    <device id="retina6_12" orientation="portrait" appearance="light"/>
+    <device id="retina6_12" orientation="landscape" appearance="light"/>
     <dependencies>
         <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="24063"/>
         <capability name="Safe area layout guides" minToolsVersion="9.0"/>
@@ -13,18 +13,92 @@
             <objects>
                 <viewController id="BV1-FR-VrT" customClass="GameViewController" customModule="PG1" customModuleProvider="target" sceneMemberID="viewController">
                     <view key="view" multipleTouchEnabled="YES" contentMode="scaleToFill" id="3se-qz-xqx" customClass="SKView">
-                        <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
+                        <rect key="frame" x="0.0" y="0.0" width="852" height="393"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <containerView opaque="NO" contentMode="scaleToFill" preservesSuperviewLayoutMargins="YES" translatesAutoresizingMaskIntoConstraints="NO" id="VxK-4z-WGb">
+                                <rect key="frame" x="637" y="83" width="140" height="32"/>
+                                <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                                <constraints>
+                                    <constraint firstAttribute="width" constant="140" id="Frk-Ar-gq1"/>
+                                    <constraint firstAttribute="height" constant="32" id="nX1-PG-XVg"/>
+                                </constraints>
+                                <connections>
+                                    <segue destination="8yB-8q-KvM" kind="embed" identifier="embedHUD" id="Wym-VF-HbW"/>
+                                </connections>
+                            </containerView>
+                        </subviews>
                         <viewLayoutGuide key="safeArea" id="x1V-Kf-rcX"/>
                         <color key="backgroundColor" systemColor="systemCyanColor"/>
+                        <constraints>
+                            <constraint firstItem="VxK-4z-WGb" firstAttribute="trailing" secondItem="x1V-Kf-rcX" secondAttribute="trailing" constant="-16" id="UnS-a7-oBI"/>
+                            <constraint firstItem="x1V-Kf-rcX" firstAttribute="top" secondItem="VxK-4z-WGb" secondAttribute="top" constant="-24" id="dJc-cc-5yb"/>
+                        </constraints>
                     </view>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="SZV-WD-TEh" sceneMemberID="firstResponder"/>
             </objects>
             <point key="canvasLocation" x="139.69465648854961" y="64.788732394366207"/>
         </scene>
+        <!--HUD-->
+        <scene sceneID="tXW-OF-tNd">
+            <objects>
+                <viewController storyboardIdentifier="HUDViewController" title="HUD" id="8yB-8q-KvM" sceneMemberID="viewController">
+                    <view key="view" contentMode="scaleToFill" id="ok3-Db-C22">
+                        <rect key="frame" x="0.0" y="0.0" width="140" height="32"/>
+                        <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                        <subviews>
+                            <visualEffectView opaque="NO" clipsSubviews="YES" contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="R8Z-tm-G0F">
+                                <rect key="frame" x="0.0" y="0.0" width="140" height="32"/>
+                                <view key="contentView" opaque="NO" clipsSubviews="YES" multipleTouchEnabled="YES" contentMode="center" insetsLayoutMarginsFromSafeArea="NO" id="Yaw-aB-qzl">
+                                    <rect key="frame" x="0.0" y="0.0" width="140" height="32"/>
+                                    <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
+                                    <subviews>
+                                        <stackView opaque="NO" contentMode="scaleToFill" alignment="center" spacing="4" translatesAutoresizingMaskIntoConstraints="NO" id="eRs-V5-6ab">
+                                            <rect key="frame" x="8" y="6" width="124" height="20"/>
+                                            <subviews>
+                                                <button opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="252" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="system" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="1dQ-bg-o48">
+                                                    <rect key="frame" x="0.0" y="0.0" width="124" height="20"/>
+                                                    <accessibility key="accessibilityConfiguration" identifier="endTurnButton" label="End Turn"/>
+                                                    <state key="normal" title="Button"/>
+                                                    <buttonConfiguration key="configuration" style="plain" image="dongsign.arrow.circlepath" catalog="system" title="End Turn" cornerStyle="capsule"/>
+                                                </button>
+                                            </subviews>
+                                        </stackView>
+                                    </subviews>
+                                    <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                                    <constraints>
+                                        <constraint firstItem="eRs-V5-6ab" firstAttribute="leading" secondItem="Yaw-aB-qzl" secondAttribute="leading" constant="8" id="4tE-29-0Jy"/>
+                                        <constraint firstItem="eRs-V5-6ab" firstAttribute="top" secondItem="Yaw-aB-qzl" secondAttribute="top" constant="6" id="O3T-GG-NsV"/>
+                                        <constraint firstAttribute="bottom" secondItem="eRs-V5-6ab" secondAttribute="bottom" constant="6" id="VxP-IS-4O7"/>
+                                        <constraint firstAttribute="trailing" secondItem="eRs-V5-6ab" secondAttribute="trailing" constant="8" id="b6S-ec-lth"/>
+                                    </constraints>
+                                </view>
+                                <blurEffect style="regular"/>
+                                <userDefinedRuntimeAttributes>
+                                    <userDefinedRuntimeAttribute type="number" keyPath="layer.cornerRadius">
+                                        <integer key="value" value="14"/>
+                                    </userDefinedRuntimeAttribute>
+                                    <userDefinedRuntimeAttribute type="boolean" keyPath="layer.masksToBounds" value="YES"/>
+                                </userDefinedRuntimeAttributes>
+                            </visualEffectView>
+                        </subviews>
+                        <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                        <constraints>
+                            <constraint firstAttribute="bottom" secondItem="R8Z-tm-G0F" secondAttribute="bottom" id="3jW-UG-dbE"/>
+                            <constraint firstItem="R8Z-tm-G0F" firstAttribute="top" secondItem="ok3-Db-C22" secondAttribute="top" id="IaN-lb-dFL"/>
+                            <constraint firstItem="R8Z-tm-G0F" firstAttribute="leading" secondItem="ok3-Db-C22" secondAttribute="leading" id="TCZ-sF-og1"/>
+                            <constraint firstAttribute="trailing" secondItem="R8Z-tm-G0F" secondAttribute="trailing" id="aOp-ag-gf6"/>
+                        </constraints>
+                    </view>
+                </viewController>
+                <placeholder placeholderIdentifier="IBFirstResponder" id="rDb-tT-83N" userLabel="First Responder" customClass="UIResponder" sceneMemberID="firstResponder"/>
+            </objects>
+            <point key="canvasLocation" x="-571" y="-46"/>
+        </scene>
     </scenes>
     <resources>
+        <image name="dongsign.arrow.circlepath" catalog="system" width="128" height="119"/>
         <systemColor name="systemCyanColor">
             <color red="0.0" green="0.75294117647058822" blue="0.90980392156862744" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
         </systemColor>

@@ -46,6 +46,12 @@ class GameScene: SKScene {
     /// Computer unit sprite (assigned in `addUnit`).
     var redUnit: SKSpriteNode!
 
+    // Multiple-units support
+    var blueUnits: [SKSpriteNode] = []
+    var redUnits: [SKSpriteNode] = []
+    var selectedUnit: SKSpriteNode?
+    private var aiUnitTurnIndex: Int = 0
+
     // MARK: UI / Highlights
 
     /// Overlay container for transient UI (move hints, highlights).
@@ -67,7 +73,11 @@ class GameScene: SKScene {
 
     /// True while a move animation is running; blocks input until finished.
     var isAnimatingMove = false
-
+    
+    // MARK: - Turn state
+    private(set) var isPlayersTurn: Bool = true
+    private(set) var turnNumber: Int = 1
+    
     // MARK: - Scene lifecycle
 
     /// Called when the scene is presented by the view.
@@ -120,9 +130,21 @@ class GameScene: SKScene {
 
         
         
-        // Example starting positions (OFFSET indices)
-        addUnit(asset: "infantry",       nodeName: "blueUnit", tint: .blue, atRow: 7,  column: 10)
-        addUnit(asset: "mechanizedinf",  nodeName: "redUnit",  tint: .red,  atRow: 13, column: 13)
+        // Player team (5 units)
+        addUnit(asset: "armor",          nodeName: "blueUnit", tint: .blue, atRow: 7,  column: 10)
+        addUnit(asset: "infantry",  nodeName: "blueUnit", tint: .blue, atRow: 8,  column: 9)
+        addUnit(asset: "infantry",       nodeName: "blueUnit", tint: .blue, atRow: 6,  column: 11)
+        addUnit(asset: "motorizedinf",       nodeName: "blueUnit", tint: .blue, atRow: 7,  column: 9)
+        addUnit(asset: "mechanizedinf",       nodeName: "blueUnit", tint: .blue, atRow: 8,  column: 11)
+
+        // Computer team (5 units)
+        addUnit(asset: "armor",          nodeName: "redUnit",  tint: .red,  atRow: 13, column: 13)
+        addUnit(asset: "infantry",       nodeName: "redUnit",  tint: .red,  atRow: 12, column: 14)
+        addUnit(asset: "infantry",  nodeName: "redUnit",  tint: .red,  atRow: 14, column: 12)
+        addUnit(asset: "motorizedinf",       nodeName: "redUnit",  tint: .red,  atRow: 13, column: 14)
+        addUnit(asset: "mechanizedinf",       nodeName: "redUnit",  tint: .red,  atRow: 12, column: 13)
+        
+        if let first = blueUnits.first { selectedUnit = first }
         
         currentTurn = .player
         enablePlayerInput(true)
@@ -180,11 +202,14 @@ class GameScene: SKScene {
         sprite.position = worldNode.convert(baseMap.centerOfTile(atColumn: col, row: row), from: baseMap)
         worldNode.addChild(sprite)
 
-        // Preserve your stored references.
+        // Preserve your stored references (legacy single-unit vars).
         if nodeName == "blueUnit" {
             blueUnit = sprite
+            blueUnits.append(sprite)
+            if selectedUnit == nil { selectedUnit = sprite }
         } else if nodeName == "redUnit" {
             redUnit = sprite
+            redUnits.append(sprite)
         }
         return sprite
     }
@@ -216,30 +241,32 @@ class GameScene: SKScene {
         guard currentTurn == .player, !isAnimatingMove, let touch = touches.first else { return }
         let scenePt = touch.location(in: self)
 
-        // 1) If a highlight was tapped, move there
-        if let tapped = nodes(at: scenePt).first(where: { $0.name == highlightName }) as? SKSpriteNode {
-            // Convert tapped hint → world → map → (col,row)
+        // 1) If a highlight was tapped, move the selected unit there
+        if let tapped = nodes(at: scenePt).first(where: { $0.name == highlightName }) as? SKSpriteNode,
+           let movingUnit = selectedUnit {
             let hintWorld = tapped.parent!.convert(tapped.position, to: worldNode)
             let hintMap   = baseMap.convert(hintWorld, from: worldNode)
             let target    = (baseMap.tileColumnIndex(fromPosition: hintMap),
                              baseMap.tileRowIndex(fromPosition: hintMap))
             clearMoveHighlights()
-            // Animate and end the player's turn on completion.
-            moveUnit(blueUnit, toCol: target.0, row: target.1) { [weak self] in self?.endTurn() }
+            moveUnit(movingUnit, toCol: target.0, row: target.1) { [weak self] in self?.endTurn() }
             return
         }
 
-        // 2) Show moves if the tile we tapped is the blue unit's tile
+        // 2) Determine which tile was tapped
         let worldPt = worldNode.convert(scenePt, from: self)
         let mapPt   = baseMap.convert(worldPt, from: worldNode)
         let tapped  = (baseMap.tileColumnIndex(fromPosition: mapPt),
                        baseMap.tileRowIndex(fromPosition: mapPt))
-        if tapped == tileIndex(of: blueUnit) {
+
+        // If the tapped tile contains a friendly unit, select it and show moves.
+        if let unit = blueUnits.first(where: { self.tileIndex(of: $0) == tapped }) {
+            selectedUnit = unit
             showMoveHighlights(from: tapped)
             return
         }
 
-        // 3) Otherwise, clear hints
+        // 3) Otherwise, clear any highlights
         if !highlightNodes.isEmpty { clearMoveHighlights() }
     }
 
@@ -303,11 +330,22 @@ class GameScene: SKScene {
     /// - Uses `nextStepToward` (BFS shortest path) for the red unit to step
     ///   one tile toward the blue unit; otherwise ends its turn.
     func runComputerTurn() {
-        let blue = tileIndex(of: blueUnit)
-        let red  = tileIndex(of: redUnit)
+        guard !redUnits.isEmpty else { endTurn(); return }
 
-        if let step = baseMap.nextStepToward(start: red, goal: blue) {
-            moveUnit(redUnit, toCol: step.col, row: step.row) { [weak self] in self?.endTurn() }
+        // Choose the next red unit in a round-robin sequence.
+        let unit = redUnits[aiUnitTurnIndex % redUnits.count]
+        aiUnitTurnIndex += 1
+
+        // Pick a goal: the nearest blue unit by simple grid distance.
+        func distance(_ a: (Int, Int), _ b: (Int, Int)) -> Int {
+            abs(a.0 - b.0) + abs(a.1 - b.1)
+        }
+        let redPos = tileIndex(of: unit)
+        let blueTargets = blueUnits.map { tileIndex(of: $0) }
+        let goal = blueTargets.min(by: { distance(redPos, $0) < distance(redPos, $1) })
+
+        if let g = goal, let step = baseMap.nextStepToward(start: redPos, goal: g) {
+            moveUnit(unit, toCol: step.col, row: step.row) { [weak self] in self?.endTurn() }
         } else {
             endTurn()
         }
@@ -325,4 +363,21 @@ class GameScene: SKScene {
             completion()
         }
     }
+    
+    // MARK: - Turn flow API called from HUD
+    /// Called by GameViewController when the HUD "End Turn" is tapped.
+    /// This ends the player's turn, runs a simple computer turn, then calls completion.
+    public func requestEndTurn(completion: @escaping () -> Void) {
+        guard currentTurn == .player, !isAnimatingMove else {
+            // If we're already in the enemy turn or animating, don't double-trigger.
+            run(.wait(forDuration: 0.05), completion: completion)
+            return
+        }
+        // Mirror the scene's normal end-turn flow: clear hints and hand control to the existing AI.
+        clearMoveHighlights()
+        endTurn()          // This switches to .computer, disables input, and calls the real AI (runComputerTurn()).
+        completion()       // HUD can re-enable immediately; AI will flip back to player when done.
+    }
+
+
 }

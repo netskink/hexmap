@@ -28,6 +28,9 @@ class GameViewController: UIViewController {
 
     // 1 screen-point guard per edge (converted to world units per scale)
     private let defaultStopInsetsPts = UIEdgeInsets(top: 1, left: 1, bottom: 1, right: 1)
+
+    // HUD
+    private weak var hudEndTurnButton: UIButton?
     
 
 
@@ -277,6 +280,7 @@ class GameViewController: UIViewController {
         let panRecognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         panRecognizer.minimumNumberOfTouches = 1
         panRecognizer.maximumNumberOfTouches = 1
+        panRecognizer.delegate = self
         view.addGestureRecognizer(panRecognizer)
         
         panRecognizer.cancelsTouchesInView = false
@@ -285,6 +289,7 @@ class GameViewController: UIViewController {
         // pinch recognizer setup
         let pinchRecognizer = UIPinchGestureRecognizer(target: self,
                                               action: #selector(handlePinch(_:)))
+        pinchRecognizer.delegate = self
         view.addGestureRecognizer(pinchRecognizer)
         pinchRecognizer.cancelsTouchesInView = false
         
@@ -317,6 +322,7 @@ class GameViewController: UIViewController {
         super.viewDidAppear(animated)
         ensureSceneMatchesView()
         updateZoomCaps()
+        wireHUDActionsIfNeeded()
     }
 
 
@@ -440,5 +446,72 @@ extension GameViewController {
         } else {
             cam.position = clamped
         }
+    }
+}
+
+// MARK: - HUD wiring (find button by accessibilityIdentifier and attach action)
+extension GameViewController {
+    private func wireHUDActionsIfNeeded() {
+        // If already wired, do nothing
+        if hudEndTurnButton != nil { return }
+        guard let root = self.view else { return }
+        if let button = findEndTurnButton(in: root) {
+            // Prevent duplicate targets if hot-reloading the view
+            button.removeTarget(nil, action: nil, for: .allEvents)
+            button.addTarget(self, action: #selector(hudEndTurnTapped(_:)), for: .touchUpInside)
+            hudEndTurnButton = button
+        }
+    }
+
+    @objc private func hudEndTurnTapped(_ sender: UIButton) {
+        sender.isEnabled = false
+        defer {
+            // Re-enable after a short delay in case the scene doesn't call back.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak sender] in sender?.isEnabled = true }
+        }
+        guard let skView = self.view as? SKView,
+              let scene = skView.scene as? GameScene else { return }
+        // Ask the scene to end the player's turn and run the computer turn.
+        scene.requestEndTurn { [weak self] in
+            // Optionally re-enable immediately on completion
+            DispatchQueue.main.async { [weak sender] in sender?.isEnabled = true }
+            // If needed, you can update other HUD elements here later.
+            _ = self
+        }
+    }
+
+    private func findEndTurnButton(in view: UIView) -> UIButton? {
+        if let b = view as? UIButton, b.accessibilityIdentifier == "endTurnButton" {
+            return b
+        }
+        for sub in view.subviews {
+            if let found = findEndTurnButton(in: sub) { return found }
+        }
+        return nil
+    }
+}
+
+// MARK: - Gesture filtering so HUD touches don't start panning/zooming
+extension GameViewController: UIGestureRecognizerDelegate {
+    public func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // 1) If the touch began inside any child view controller's view (e.g., the HUD container),
+        //    don't let SKView's pan/pinch recognizers begin.
+        let locationInSelf = touch.location(in: self.view)
+        for child in self.children {
+            // Convert the point into the child's coordinate space and see if it's inside that view.
+            let pInChild = self.view.convert(locationInSelf, to: child.view)
+            if child.view.point(inside: pInChild, with: nil) {
+                return false
+            }
+        }
+        
+        // 2) Also block if the touch is on a UIControl (UIButton, UISwitch, etc.)
+        var v: UIView? = touch.view
+        while let current = v {
+            if current is UIControl { return false }
+            v = current.superview
+        }
+        
+        return true
     }
 }
