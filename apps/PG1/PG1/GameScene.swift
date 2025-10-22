@@ -67,7 +67,11 @@ class GameScene: SKScene {
 
     /// True while a move animation is running; blocks input until finished.
     var isAnimatingMove = false
-
+    
+    // MARK: - Turn state
+    private(set) var isPlayersTurn: Bool = true
+    private(set) var turnNumber: Int = 1
+    
     // MARK: - Scene lifecycle
 
     /// Called when the scene is presented by the view.
@@ -325,4 +329,21 @@ class GameScene: SKScene {
             completion()
         }
     }
+    
+    // MARK: - Turn flow API called from HUD
+    /// Called by GameViewController when the HUD "End Turn" is tapped.
+    /// This ends the player's turn, runs a simple computer turn, then calls completion.
+    public func requestEndTurn(completion: @escaping () -> Void) {
+        guard currentTurn == .player, !isAnimatingMove else {
+            // If we're already in the enemy turn or animating, don't double-trigger.
+            run(.wait(forDuration: 0.05), completion: completion)
+            return
+        }
+        // Mirror the scene's normal end-turn flow: clear hints and hand control to the existing AI.
+        clearMoveHighlights()
+        endTurn()          // This switches to .computer, disables input, and calls the real AI (runComputerTurn()).
+        completion()       // HUD can re-enable immediately; AI will flip back to player when done.
+    }
+
+
 }
