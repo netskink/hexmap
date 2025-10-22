@@ -38,6 +38,15 @@
       location = "group:docs"
       name = "docs">
       <FileRef
+         location = "group:coordinates.png">
+      </FileRef>
+      <FileRef
+         location = "group:CoordinateSystemsFlowinGameViewController.swift.png">
+      </FileRef>
+      <FileRef
+         location = "group:TileMapwithZoomedInCameraViewport.png">
+      </FileRef>
+      <FileRef
          location = "group:sceneEditor.md">
       </FileRef>
       <FileRef
@@ -56,6 +65,9 @@
    <Group
       location = "group:art"
       name = "art">
+      <FileRef
+         location = "group:icon.png">
+      </FileRef>
       <Group
          location = "group:flattop"
          name = "flattop">
