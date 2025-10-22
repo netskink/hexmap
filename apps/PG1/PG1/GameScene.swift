@@ -138,11 +138,11 @@ class GameScene: SKScene {
         addUnit(asset: "mechanizedinf",       nodeName: "blueUnit", tint: .blue, atRow: 8,  column: 11)
 
         // Computer team (5 units)
-        addUnit(asset: "armor",          nodeName: "redUnit",  tint: .red,  atRow: 13, column: 13)
-        addUnit(asset: "infantry",       nodeName: "redUnit",  tint: .red,  atRow: 12, column: 14)
-        addUnit(asset: "infantry",  nodeName: "redUnit",  tint: .red,  atRow: 14, column: 12)
-        addUnit(asset: "motorizedinf",       nodeName: "redUnit",  tint: .red,  atRow: 13, column: 14)
-        addUnit(asset: "mechanizedinf",       nodeName: "redUnit",  tint: .red,  atRow: 12, column: 13)
+        addUnit(asset: "armor",          nodeName: "redUnit",  tint: .red,  atRow: 10, column: 18)
+        addUnit(asset: "infantry",       nodeName: "redUnit",  tint: .red,  atRow: 6, column: 19)
+        addUnit(asset: "infantry",  nodeName: "redUnit",  tint: .red,  atRow: 8, column: 20)
+        addUnit(asset: "motorizedinf",       nodeName: "redUnit",  tint: .red,  atRow: 6, column: 21)
+        addUnit(asset: "mechanizedinf",       nodeName: "redUnit",  tint: .red,  atRow: 5, column: 22)
         
         if let first = blueUnits.first { selectedUnit = first }
         
