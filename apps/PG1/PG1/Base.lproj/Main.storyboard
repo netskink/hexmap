@@ -17,7 +17,7 @@
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <containerView opaque="NO" contentMode="scaleToFill" preservesSuperviewLayoutMargins="YES" translatesAutoresizingMaskIntoConstraints="NO" id="VxK-4z-WGb">
-                                <rect key="frame" x="669" y="83" width="140" height="32"/>
+                                <rect key="frame" x="637" y="83" width="140" height="32"/>
                                 <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                                 <constraints>
                                     <constraint firstAttribute="width" constant="140" id="Frk-Ar-gq1"/>
@@ -31,7 +31,7 @@
                         <viewLayoutGuide key="safeArea" id="x1V-Kf-rcX"/>
                         <color key="backgroundColor" systemColor="systemCyanColor"/>
                         <constraints>
-                            <constraint firstItem="VxK-4z-WGb" firstAttribute="trailing" secondItem="x1V-Kf-rcX" secondAttribute="trailing" constant="16" id="UnS-a7-oBI"/>
+                            <constraint firstItem="VxK-4z-WGb" firstAttribute="trailing" secondItem="x1V-Kf-rcX" secondAttribute="trailing" constant="-16" id="UnS-a7-oBI"/>
                             <constraint firstItem="x1V-Kf-rcX" firstAttribute="top" secondItem="VxK-4z-WGb" secondAttribute="top" constant="-24" id="dJc-cc-5yb"/>
                         </constraints>
                     </view>
@@ -54,7 +54,7 @@
                                     <rect key="frame" x="0.0" y="0.0" width="140" height="32"/>
                                     <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                                     <subviews>
-                                        <stackView opaque="NO" contentMode="scaleToFill" alignment="center" spacing="8" translatesAutoresizingMaskIntoConstraints="NO" id="eRs-V5-6ab">
+                                        <stackView opaque="NO" contentMode="scaleToFill" alignment="center" spacing="4" translatesAutoresizingMaskIntoConstraints="NO" id="eRs-V5-6ab">
                                             <rect key="frame" x="8" y="6" width="124" height="20"/>
                                             <subviews>
                                                 <button opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="252" contentHorizontalAlignment="center" contentVerticalAlignment="center" buttonType="system" lineBreakMode="middleTruncation" translatesAutoresizingMaskIntoConstraints="NO" id="1dQ-bg-o48">
