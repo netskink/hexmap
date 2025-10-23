@@ -5,6 +5,167 @@
 
 import SpriteKit
 
+// MARK: - Hex (Flat-Top) Cube Coordinates Helpers
+// Using even-q (columns) offset for a flat-top SKTileMapNode.
+// If your tile set uses odd-q, swap the neighbor deltas in `offsetNeighbors(col:row:)` accordingly.
+private struct Cube: Hashable {
+    let x: Int
+    let y: Int
+    let z: Int
+}
+
+private struct Offset: Hashable { let col: Int; let row: Int }
+
+
+// Cache by prototype name ("Infantry", "Armor", etc.)
+private var unitPrototypes: [String: SKSpriteNode] = [:]
+
+private func loadUnitPrototype(named name: String) -> SKSpriteNode? {
+    if let cached = unitPrototypes[name] { return cached }
+
+    // Load Units.sks once, capture the child you need
+    guard let unitsScene = SKScene(fileNamed: "Units"),
+          let node = unitsScene.childNode(withName: name) as? SKSpriteNode
+    else {
+        print("⚠️ Prototype \(name) not found in Units.sks")
+        return nil
+    }
+
+    unitPrototypes[name] = node
+    return node
+}
+
+
+private extension GameScene {
+    // Convert even-q offset -> cube (flat-top)
+    func cubeFrom(col q: Int, row r: Int) -> Cube {
+        // even-q vertical layout (flat-top):
+        // x = q
+        // z = r - (q + (q & 1)) / 2
+        // y = -x - z
+        let z = r - (q + (q & 1)) / 2
+        let x = q
+        let y = -x - z
+        return Cube(x: x, y: y, z: z)
+    }
+
+    // Convert cube -> even-q offset (flat-top)
+    func offsetFrom(cube c: Cube) -> (col: Int, row: Int) {
+        // r = z + (q + (q & 1)) / 2 with q = x
+        let q = c.x
+        let r = c.z + (q + (q & 1)) / 2
+        return (q, r)
+    }
+
+    // Proper hex distance in cube space
+    func cubeDistance(_ a: Cube, _ b: Cube) -> Int {
+        return max(abs(a.x - b.x), abs(a.y - b.y), abs(a.z - b.z))
+    }
+
+    // Map bounds and walkability guards
+    func inBounds(col: Int, row: Int) -> Bool {
+        guard let map = baseMap else { return false }
+        return col >= 0 && row >= 0 && col < map.numberOfColumns && row < map.numberOfRows
+    }
+
+    // For flat-top even-q neighbors in offset coordinates (no filtering)
+    func offsetNeighbors(col q: Int, row r: Int) -> [(col: Int, row: Int)] {
+        // even columns use one set, odd columns the other
+        if q & 1 == 0 { // even q
+            return [
+                (q+1, r    ), (q+1, r-1),
+                (q,   r-1 ),
+                (q-1, r-1), (q-1, r   ),
+                (q,   r+1 )
+            ]
+        } else { // odd q
+            return [
+                (q+1, r+1), (q+1, r   ),
+                (q,   r-1),
+                (q-1, r  ), (q-1, r+1),
+                (q,   r+1)
+            ]
+        }
+    }
+
+    // Safe, walkable neighbors
+    func walkableNeighbors(col: Int, row: Int) -> [(col: Int, row: Int)] {
+        return offsetNeighbors(col: col, row: row)
+            .filter { inBounds(col: $0.col, row: $0.row) }
+            .filter { baseMap.isWalkable(col: $0.col, row: $0.row) }
+    }
+
+    // Flood-fill reachable tiles by movement points (cost = 1 per tile)
+    func reachableTiles(from start: (col: Int, row: Int), movePoints: Int) -> [(Int, Int)] {
+        guard movePoints > 0 else { return [] }
+        var visitedOffsets: Set<Offset> = [ Offset(col: start.col, row: start.row) ]
+        var frontier: [(col: Int, row: Int, cost: Int)] = [ (start.col, start.row, 0) ]
+        while let current = frontier.first {
+            frontier.removeFirst()
+            if current.cost == movePoints { continue }
+            for n in walkableNeighbors(col: current.col, row: current.row) {
+                let key = Offset(col: n.col, row: n.row)
+                if !visitedOffsets.contains(key) {
+                    visitedOffsets.insert(key)
+                    frontier.append( (n.col, n.row, current.cost + 1) )
+                }
+            }
+        }
+        // Map back to array of tuples for the public API
+        return visitedOffsets.map { ($0.col, $0.row) }
+    }
+
+    // MARK: - A* pathfinding (avoids local minima near water/impassable tiles)
+    func aStarPath(from start: (col: Int, row: Int), to goal: (col: Int, row: Int)) -> [(Int, Int)] {
+        let startKey = Offset(col: start.col, row: start.row)
+        let goalKey  = Offset(col: goal.col,  row: goal.row)
+        if startKey == goalKey { return [ (start.col, start.row) ] }
+
+        // gScore: cost from start; fScore: g + heuristic
+        var gScore: [Offset: Int] = [ startKey: 0 ]
+        var fScore: [Offset: Int] = [ startKey: cubeDistance(cubeFrom(col: start.col, row: start.row),
+                                                             cubeFrom(col: goal.col,  row: goal.row)) ]
+        var cameFrom: [Offset: Offset] = [:]
+
+        // Open set: Offsets to visit; we use a simple array and pick the min fScore each loop
+        var openSet: Set<Offset> = [ startKey ]
+
+        while !openSet.isEmpty {
+            // current = node in openSet with lowest fScore
+            let current: Offset = openSet.min(by: { (lhs, rhs) in
+                (fScore[lhs] ?? Int.max) < (fScore[rhs] ?? Int.max)
+            })!
+
+            if current == goalKey {
+                // reconstruct path
+                var path: [Offset] = [current]
+                var c = current
+                while let prev = cameFrom[c] { path.append(prev); c = prev }
+                path.reverse()
+                return path.map { ($0.col, $0.row) }
+            }
+
+            openSet.remove(current)
+            let currentG = gScore[current] ?? Int.max
+
+            for nb in walkableNeighbors(col: current.col, row: current.row) {
+                let nbKey = Offset(col: nb.col, row: nb.row)
+                let tentativeG = currentG + 1 // uniform cost per step
+                if tentativeG < (gScore[nbKey] ?? Int.max) {
+                    cameFrom[nbKey] = current
+                    gScore[nbKey] = tentativeG
+                    let h = cubeDistance(cubeFrom(col: nb.col, row: nb.row),
+                                         cubeFrom(col: goal.col, row: goal.row))
+                    fScore[nbKey] = tentativeG + h
+                    openSet.insert(nbKey)
+                }
+            }
+        }
+        // No path
+        return []
+    }
+}
+
 
 
 extension Notification.Name {
@@ -14,6 +175,9 @@ extension Notification.Name {
 
 /// Side currently taking a turn.
 enum Turn { case player, computer }
+
+/// Team affiliation used for spawning/tinting units.
+enum Team { case player, computer }
 
 /// Root SpriteKit scene.
 /// - Owns `worldNode` (the container you pan/zoom), the hex `baseMap`,
@@ -129,21 +293,21 @@ class GameScene: SKScene {
         }()
 
         
-        
-        // Player team (5 units)
-        addUnit(asset: "armor",          nodeName: "blueUnit", tint: .blue, atRow: 7,  column: 10)
-        addUnit(asset: "infantry",  nodeName: "blueUnit", tint: .blue, atRow: 8,  column: 9)
-        addUnit(asset: "infantry",       nodeName: "blueUnit", tint: .blue, atRow: 6,  column: 11)
-        addUnit(asset: "motorizedinf",       nodeName: "blueUnit", tint: .blue, atRow: 7,  column: 9)
-        addUnit(asset: "mechanizedinf",       nodeName: "blueUnit", tint: .blue, atRow: 8,  column: 11)
+        // Player team (spawn from Units.sks prototypes)
+        _ = spawnUnit(from: "Infantry",            atCol: 9,  row: 8, team: .player)
+        _ = spawnUnit(from: "Infantry",            atCol: 11, row: 6, team: .player)
+        _ = spawnUnit(from: "Armor",               atCol: 10, row: 7, team: .player)
+        _ = spawnUnit(from: "MotorizedInfantry",   atCol: 9,  row: 7, team: .player)
+        _ = spawnUnit(from: "MechanizedInfantry",  atCol: 11, row: 8, team: .player)
 
-        // Computer team (5 units)
-        addUnit(asset: "armor",          nodeName: "redUnit",  tint: .red,  atRow: 10, column: 18)
-        addUnit(asset: "infantry",       nodeName: "redUnit",  tint: .red,  atRow: 6, column: 19)
-        addUnit(asset: "infantry",  nodeName: "redUnit",  tint: .red,  atRow: 8, column: 20)
-        addUnit(asset: "motorizedinf",       nodeName: "redUnit",  tint: .red,  atRow: 6, column: 21)
-        addUnit(asset: "mechanizedinf",       nodeName: "redUnit",  tint: .red,  atRow: 5, column: 22)
-        
+        // Computer team (spawn from Units.sks prototypes)
+        _ = spawnUnit(from: "Armor",               atCol: 18, row: 10, team: .computer)
+        _ = spawnUnit(from: "Infantry",            atCol: 19, row: 6,  team: .computer)
+        _ = spawnUnit(from: "Infantry",            atCol: 20, row: 8,  team: .computer)
+        _ = spawnUnit(from: "MotorizedInfantry",   atCol: 21, row: 6,  team: .computer)
+        _ = spawnUnit(from: "MechanizedInfantry",  atCol: 22, row: 5,  team: .computer)
+
+        // Select the first player unit for convenience
         if let first = blueUnits.first { selectedUnit = first }
         
         currentTurn = .player
@@ -151,6 +315,51 @@ class GameScene: SKScene {
 
     }
 
+    
+    @discardableResult
+    func spawnUnit(from prototypeName: String, atCol col: Int, row: Int, team: Team) -> SKSpriteNode? {
+        guard let proto = loadUnitPrototype(named: prototypeName) else { return nil }
+
+        // Copy the prototype (this clones textures, physics, etc.)
+        guard let sprite = proto.copy() as? SKSpriteNode else { return nil }
+
+        // Carry over editor-defined userData (MP, MaxHP, etc.), then add instance state
+        let copiedUserData = (proto.userData?.mutableCopy() as? NSMutableDictionary) ?? NSMutableDictionary()
+        if let maxHP = copiedUserData["MaxHP"] as? Int {
+            // initialize per-instance HP from MaxHP
+            copiedUserData["HP"] = maxHP
+        } else {
+            // default if not present
+            copiedUserData["HP"] = 10
+        }
+        sprite.userData = copiedUserData
+
+        // Apply classic team tint
+        switch team {
+        case .player:
+            sprite.color = .blue
+            sprite.colorBlendFactor = 0.6
+        case .computer:
+            sprite.color = .red
+            sprite.colorBlendFactor = 0.6
+        }
+
+        // Place on the map
+        let center = baseMap.centerOfTile(atColumn: col, row: row)
+        sprite.position = worldNode.convert(center, from: baseMap)
+        sprite.zPosition = 100 // or your normal unit layer
+        sprite.name = "\(prototypeName)_\(UUID().uuidString)"
+
+        worldNode.addChild(sprite)
+
+        // Register by team (if you track arrays)
+        switch team {
+        case .player: blueUnits.append(sprite)
+        case .computer: redUnits.append(sprite)
+        }
+
+        return sprite
+    }
     
     // MARK: - Scene update cycle
 
@@ -173,6 +382,20 @@ class GameScene: SKScene {
     
     
     // MARK: - Add units
+
+    // MARK: - Unit movement profiles (by asset)
+    private func movementPoints(for sprite: SKSpriteNode) -> Int {
+        // Default if no userData or missing key
+        var movePoints = 1
+        if let mpValue = sprite.userData?["MP"] {
+            if let intVal = mpValue as? Int {
+                movePoints = intVal
+            } else if let strVal = mpValue as? String, let intVal = Int(strVal) {
+                movePoints = intVal
+            }
+        }
+        return movePoints
+    }
 
     /// Creates a sprite from `Assets.xcassets` and places it on the map.
     /// - Parameters:
@@ -241,10 +464,12 @@ class GameScene: SKScene {
         guard currentTurn == .player, !isAnimatingMove, let touch = touches.first else { return }
         let scenePt = touch.location(in: self)
 
-        // 1) If a highlight was tapped, move the selected unit there
+        // 1) If a highlight was tapped, move the selected unit there (convert from overlay -> world -> map safely)
         if let tapped = nodes(at: scenePt).first(where: { $0.name == highlightName }) as? SKSpriteNode,
            let movingUnit = selectedUnit {
-            let hintWorld = tapped.parent!.convert(tapped.position, to: worldNode)
+            let hintWorld = tapped.parent == overlayNode
+                ? overlayNode.convert(tapped.position, to: worldNode)
+                : tapped.parent!.convert(tapped.position, to: worldNode)
             let hintMap   = baseMap.convert(hintWorld, from: worldNode)
             let target    = (baseMap.tileColumnIndex(fromPosition: hintMap),
                              baseMap.tileRowIndex(fromPosition: hintMap))
@@ -278,25 +503,24 @@ class GameScene: SKScene {
         highlightNodes.removeAll()
     }
 
-    /// Displays move hint sprites on all **walkable geometric neighbors**
-    /// around `start`. Uses `SKTileMapNode.proximityNeighbors` to avoid
-    /// parity/offset mistakes common with flat-top hex maps.
+    /// Displays move hint sprites on all **reachable tiles** within the selected unit's movement points.
+    /// Uses flat-top even-q cube math and safe in-bounds + walkable checks.
     func showMoveHighlights(from start: (col: Int, row: Int)) {
         clearMoveHighlights()
 
-        // Candidate neighbor tiles filtered to in-bounds & walkable.
-        let options = baseMap.proximityNeighbors(col: start.col, row: start.row)
-            .filter { baseMap.isWalkable(col: $0.col, row: $0.row) }
+        guard let unit = selectedUnit else { return }
+        let mp = movementPoints(for: unit)
 
-        for n in options {
+        // Compute reachable tiles (includes start); filter out the start tile.
+        let reachable = reachableTiles(from: start, movePoints: mp)
+            .filter { !($0.0 == start.col && $0.1 == start.row) }
+
+        // Render hints
+        for (c, r) in reachable {
             let hint = SKSpriteNode(texture: SKTexture(imageNamed: highlightTextureName))
-            hint.name = "moveHint"
+            hint.name = highlightName
             hint.alpha = 0.85
-            // Place hint at tile center (map → world).
-            hint.position = worldNode.convert(
-                baseMap.centerOfTile(atColumn: n.col, row: n.row),
-                from: baseMap
-            )
+            hint.position = worldNode.convert(baseMap.centerOfTile(atColumn: c, row: r), from: baseMap)
             overlayNode.addChild(hint)
             highlightNodes.append(hint)
         }
@@ -336,16 +560,31 @@ class GameScene: SKScene {
         let unit = redUnits[aiUnitTurnIndex % redUnits.count]
         aiUnitTurnIndex += 1
 
-        // Pick a goal: the nearest blue unit by simple grid distance.
+        // Pick a goal: the nearest blue unit by true hex (cube) distance.
         func distance(_ a: (Int, Int), _ b: (Int, Int)) -> Int {
-            abs(a.0 - b.0) + abs(a.1 - b.1)
+            let ca = cubeFrom(col: a.0, row: a.1)
+            let cb = cubeFrom(col: b.0, row: b.1)
+            return cubeDistance(ca, cb)
         }
         let redPos = tileIndex(of: unit)
         let blueTargets = blueUnits.map { tileIndex(of: $0) }
         let goal = blueTargets.min(by: { distance(redPos, $0) < distance(redPos, $1) })
 
-        if let g = goal, let step = baseMap.nextStepToward(start: redPos, goal: g) {
-            moveUnit(unit, toCol: step.col, row: step.row) { [weak self] in self?.endTurn() }
+        if let g = goal {
+            let start = tileIndex(of: unit)
+            let mp = movementPoints(for: unit)
+
+            // Use A* to find a path around obstacles (e.g., water); then take up to `mp` steps this turn.
+            let path = aStarPath(from: start, to: g)
+            if path.count >= 2 {
+                // path includes start; move along up to `mp` steps
+                let stepsToTake = min(mp, path.count - 1)
+                let targetIdx = path[stepsToTake]
+                moveUnit(unit, toCol: targetIdx.0, row: targetIdx.1) { [weak self] in self?.endTurn() }
+            } else {
+                // No path or already at goal
+                endTurn()
+            }
         } else {
             endTurn()
         }
