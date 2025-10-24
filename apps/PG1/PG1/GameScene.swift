@@ -95,6 +95,74 @@ private extension GameScene {
             .filter { baseMap.isWalkable(col: $0.col, row: $0.row) }
     }
     
+    // MARK: - Motorized rules helpers
+    /// Returns true if the given unit should use the motorized rule set (Armor/MechanizedInfantry/MotorizedInfantry).
+    func isMotorizedUnit(_ node: SKSpriteNode) -> Bool {
+        // Our spawnUnit() sets name as "<PrototypeName>_<UUID>", so use the prefix
+        guard let name = node.name else { return false }
+        let type = name.split(separator: "_").first.map(String.init) ?? ""
+        switch type {
+        case "Armor", "MechanizedInfantry", "MotorizedInfantry":
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Checks the tile definition userData for key "AM" and returns true only when AM == 1.
+    /// Xcode's Tile Set editor typically stores this as 0/1 (NSNumber). Accepts true-like values as fallback.
+    func tileHasAMOne(col: Int, row: Int) -> Bool {
+        guard inBounds(col: col, row: row) else { return false }
+        guard let def = baseMap.tileDefinition(atColumn: col, row: row),
+              let ud  = def.userData else { return false }
+        if let n = ud["AM"] as? NSNumber { return n.intValue == 1 }
+        if let b = ud["AM"] as? Bool { return b }
+        if let s = ud["AM"] as? String { return s == "1" || s.lowercased() == "true" }
+        return false
+    }
+
+    /// Returns the numeric AM flag if present on the tile definition (0/1), otherwise nil.
+    func tileAMValue(col: Int, row: Int) -> Int? {
+        guard inBounds(col: col, row: row) else { return nil }
+        guard let def = baseMap.tileDefinition(atColumn: col, row: row),
+              let ud  = def.userData else { return nil }
+        if let n = ud["AM"] as? NSNumber { return n.intValue }
+        if let b = ud["AM"] as? Bool { return b ? 1 : 0 }
+        if let s = ud["AM"] as? String {
+            if s == "1" || s.lowercased() == "true" { return 1 }
+            if s == "0" || s.lowercased() == "false" { return 0 }
+        }
+        return nil
+    }
+
+    /// Neighbor generator that applies walkability + occupancy and the motorized rule.
+    /// For motorized units (Armor/MechanizedInfantry/MotorizedInfantry), a neighbor is allowed if
+    ///   - it is in-bounds
+    ///   - it is not occupied
+    ///   - If AM == 0 on the tile: forbid (even if walkable)
+    ///   - Else allow if (baseMap.isWalkable == true) OR (AM == 1)
+    /// For all other units, the neighbor must satisfy baseMap.isWalkable == true.
+    func allowedNeighborTiles(for unit: SKSpriteNode,
+                              from col: Int,
+                              row: Int,
+                              occupied: Set<Offset>) -> [(col: Int, row: Int)] {
+        let motorized = isMotorizedUnit(unit)
+        return offsetNeighbors(col: col, row: row)
+            .filter { inBounds(col: $0.col, row: $0.row) }
+            .filter { !occupied.contains(Offset(col: $0.col, row: $0.row)) }
+            .filter { neighbor in
+                if motorized {
+                    let am = tileAMValue(col: neighbor.col, row: neighbor.row)
+                    // If the tile explicitly marks AM==0, motorized units cannot enter
+                    if let am = am, am == 0 { return false }
+                    // Otherwise, allow normal walkables OR explicit AM==1 tiles (even if not walkable)
+                    return baseMap.isWalkable(col: neighbor.col, row: neighbor.row) || (am == 1)
+                } else {
+                    return baseMap.isWalkable(col: neighbor.col, row: neighbor.row)
+                }
+            }
+    }
+
     // MARK: - Occupancy helpers
     /// Returns true if a unit (other than `excluding`) occupies the (col,row).
     func isTileOccupied(col: Int, row: Int, excluding: SKSpriteNode? = nil) -> Bool {
@@ -123,14 +191,18 @@ private extension GameScene {
     
     
     // Flood-fill reachable tiles by movement points (cost = 1 per tile), avoiding occupied tiles.
-    func reachableTiles(from start: (col: Int, row: Int), movePoints: Int, occupied: Set<Offset>) -> [(Int, Int)] {
+    // Applies motorized rules via allowedNeighborTiles(for:).
+    func reachableTiles(for unit: SKSpriteNode,
+                        from start: (col: Int, row: Int),
+                        movePoints: Int,
+                        occupied: Set<Offset>) -> [(Int, Int)] {
         guard movePoints > 0 else { return [] }
         var visitedOffsets: Set<Offset> = [ Offset(col: start.col, row: start.row) ]
         var frontier: [(col: Int, row: Int, cost: Int)] = [ (start.col, start.row, 0) ]
         while let current = frontier.first {
             frontier.removeFirst()
             if current.cost == movePoints { continue }
-            let nbrs = walkableUnoccupiedNeighbors(col: current.col, row: current.row, occupied: occupied)
+            let nbrs = allowedNeighborTiles(for: unit, from: current.col, row: current.row, occupied: occupied)
             for n in nbrs {
                 let key = Offset(col: n.col, row: n.row)
                 if !visitedOffsets.contains(key) {
@@ -144,25 +216,28 @@ private extension GameScene {
     
     
     // MARK: - A* pathfinding (avoids local minima near water/impassable tiles) and avoids occupied tiles
-    func aStarPath(from start: (col: Int, row: Int), to goal: (col: Int, row: Int), occupied: Set<Offset>) -> [(Int, Int)] {
+    func aStarPath(for unit: SKSpriteNode,
+                   from start: (col: Int, row: Int),
+                   to goal: (col: Int, row: Int),
+                   occupied: Set<Offset>) -> [(Int, Int)] {
         let startKey = Offset(col: start.col, row: start.row)
         let goalKey  = Offset(col: goal.col,  row: goal.row)
         if startKey == goalKey { return [ (start.col, start.row) ] }
-        
+
         // If the goal itself is occupied (by another unit), no legal path (no stacking).
         if occupied.contains(goalKey) { return [] }
-        
+
         var gScore: [Offset: Int] = [ startKey: 0 ]
         var fScore: [Offset: Int] = [ startKey: cubeDistance(cubeFrom(col: start.col, row: start.row),
                                                              cubeFrom(col: goal.col,  row: goal.row)) ]
         var cameFrom: [Offset: Offset] = [:]
         var openSet: Set<Offset> = [ startKey ]
-        
+
         while !openSet.isEmpty {
             let current: Offset = openSet.min(by: { (lhs, rhs) in
                 (fScore[lhs] ?? Int.max) < (fScore[rhs] ?? Int.max)
             })!
-            
+
             if current == goalKey {
                 var path: [Offset] = [current]
                 var c = current
@@ -170,11 +245,11 @@ private extension GameScene {
                 path.reverse()
                 return path.map { ($0.col, $0.row) }
             }
-            
+
             openSet.remove(current)
             let currentG = gScore[current] ?? Int.max
-            
-            for nb in walkableUnoccupiedNeighbors(col: current.col, row: current.row, occupied: occupied) {
+
+            for nb in allowedNeighborTiles(for: unit, from: current.col, row: current.row, occupied: occupied) {
                 let nbKey = Offset(col: nb.col, row: nb.row)
                 let tentativeG = currentG + 1
                 if tentativeG < (gScore[nbKey] ?? Int.max) {
@@ -540,12 +615,9 @@ class GameScene: SKScene {
 
         guard let unit = selectedUnit else { return }
         let mp = movementPoints(for: unit)
-
-        
         let occ = occupiedOffsets(excluding: unit)
-        
         // Compute reachable tiles (includes start); filter out the start tile.
-        let reachable = reachableTiles(from: start, movePoints: mp, occupied: occ)
+        let reachable = reachableTiles(for: unit, from: start, movePoints: mp, occupied: occ)
             .filter { !($0.0 == start.col && $0.1 == start.row) }
 
         // Render hints
@@ -612,13 +684,24 @@ class GameScene: SKScene {
             // choose the best adjacent, unoccupied approach tile instead.
             let occ = occupiedOffsets(excluding: unit)
 
-            // Candidates: all unoccupied, walkable neighbors around the goal
-            let goalNeighbors = walkableUnoccupiedNeighbors(col: g.0, row: g.1, occupied: occ)
+            // Candidates: all unoccupied neighbors around the goal that are legal for this unit (walkable OR AM == false if motorized)
+            let allNbrs = offsetNeighbors(col: g.0, row: g.1)
+                .filter { inBounds(col: $0.col, row: $0.row) }
+                .filter { !occ.contains(Offset(col: $0.col, row: $0.row)) }
+                .filter { neighbor in
+                    if isMotorizedUnit(unit) {
+                        let am = tileAMValue(col: neighbor.col, row: neighbor.row)
+                        if let am = am, am == 0 { return false }
+                        return baseMap.isWalkable(col: neighbor.col, row: neighbor.row) || (am == 1)
+                    } else {
+                        return baseMap.isWalkable(col: neighbor.col, row: neighbor.row)
+                    }
+                }
 
             // Choose the neighbor that yields the shortest A* path from start. If ties, pick closer to the true goal.
             var bestPath: [(Int, Int)] = []
-            for cand in goalNeighbors {
-                let p = aStarPath(from: start, to: cand, occupied: occ)
+            for cand in allNbrs {
+                let p = aStarPath(for: unit, from: start, to: cand, occupied: occ)
                 if p.isEmpty { continue }
                 if bestPath.isEmpty || p.count < bestPath.count {
                     bestPath = p
