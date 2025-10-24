@@ -401,7 +401,7 @@ class GameScene: SKScene {
         _ = spawnUnit(from: "MechanizedInfantry",  atCol: 11, row: 8, team: .player)
 
         // Computer team (spawn from Units.sks prototypes)
-        _ = spawnUnit(from: "Armor",               atCol: 18, row: 10, team: .computer)
+        _ = spawnUnit(from: "Armor",               atCol: 17, row: 10, team: .computer)
         _ = spawnUnit(from: "Infantry",            atCol: 19, row: 6,  team: .computer)
         _ = spawnUnit(from: "Infantry",            atCol: 20, row: 8,  team: .computer)
         _ = spawnUnit(from: "MotorizedInfantry",   atCol: 21, row: 6,  team: .computer)
