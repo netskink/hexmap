@@ -48,7 +48,7 @@ private extension GameScene {
         let y = -x - z
         return Cube(x: x, y: y, z: z)
     }
-
+    
     // Convert cube -> even-q offset (flat-top)
     func offsetFrom(cube c: Cube) -> (col: Int, row: Int) {
         // r = z + (q + (q & 1)) / 2 with q = x
@@ -56,18 +56,18 @@ private extension GameScene {
         let r = c.z + (q + (q & 1)) / 2
         return (q, r)
     }
-
+    
     // Proper hex distance in cube space
     func cubeDistance(_ a: Cube, _ b: Cube) -> Int {
         return max(abs(a.x - b.x), abs(a.y - b.y), abs(a.z - b.z))
     }
-
+    
     // Map bounds and walkability guards
     func inBounds(col: Int, row: Int) -> Bool {
         guard let map = baseMap else { return false }
         return col >= 0 && row >= 0 && col < map.numberOfColumns && row < map.numberOfRows
     }
-
+    
     // For flat-top even-q neighbors in offset coordinates (no filtering)
     func offsetNeighbors(col q: Int, row r: Int) -> [(col: Int, row: Int)] {
         // even columns use one set, odd columns the other
@@ -87,23 +87,51 @@ private extension GameScene {
             ]
         }
     }
-
+    
     // Safe, walkable neighbors
     func walkableNeighbors(col: Int, row: Int) -> [(col: Int, row: Int)] {
         return offsetNeighbors(col: col, row: row)
             .filter { inBounds(col: $0.col, row: $0.row) }
             .filter { baseMap.isWalkable(col: $0.col, row: $0.row) }
     }
-
-    // Flood-fill reachable tiles by movement points (cost = 1 per tile)
-    func reachableTiles(from start: (col: Int, row: Int), movePoints: Int) -> [(Int, Int)] {
+    
+    // MARK: - Occupancy helpers
+    /// Returns true if a unit (other than `excluding`) occupies the (col,row).
+    func isTileOccupied(col: Int, row: Int, excluding: SKSpriteNode? = nil) -> Bool {
+        let occ = occupiedOffsets(excluding: excluding)
+        return occ.contains(Offset(col: col, row: row))
+    }
+    
+    /// Collect a Set of occupied tile Offsets for all units, optionally excluding one unit (e.g., the mover).
+    func occupiedOffsets(excluding: SKSpriteNode? = nil) -> Set<Offset> {
+        var set: Set<Offset> = []
+        for u in (blueUnits + redUnits) {
+            if let ex = excluding, u === ex { continue }
+            let idx = tileIndex(of: u)
+            set.insert(Offset(col: idx.col, row: idx.row))
+        }
+        return set
+    }
+    
+    /// Walkable + not occupied neighbors.
+    func walkableUnoccupiedNeighbors(col: Int, row: Int, occupied: Set<Offset>) -> [(col: Int, row: Int)] {
+        return offsetNeighbors(col: col, row: row)
+            .filter { inBounds(col: $0.col, row: $0.row) }
+            .filter { baseMap.isWalkable(col: $0.col, row: $0.row) }
+            .filter { !occupied.contains(Offset(col: $0.col, row: $0.row)) }
+    }
+    
+    
+    // Flood-fill reachable tiles by movement points (cost = 1 per tile), avoiding occupied tiles.
+    func reachableTiles(from start: (col: Int, row: Int), movePoints: Int, occupied: Set<Offset>) -> [(Int, Int)] {
         guard movePoints > 0 else { return [] }
         var visitedOffsets: Set<Offset> = [ Offset(col: start.col, row: start.row) ]
         var frontier: [(col: Int, row: Int, cost: Int)] = [ (start.col, start.row, 0) ]
         while let current = frontier.first {
             frontier.removeFirst()
             if current.cost == movePoints { continue }
-            for n in walkableNeighbors(col: current.col, row: current.row) {
+            let nbrs = walkableUnoccupiedNeighbors(col: current.col, row: current.row, occupied: occupied)
+            for n in nbrs {
                 let key = Offset(col: n.col, row: n.row)
                 if !visitedOffsets.contains(key) {
                     visitedOffsets.insert(key)
@@ -111,46 +139,44 @@ private extension GameScene {
                 }
             }
         }
-        // Map back to array of tuples for the public API
         return visitedOffsets.map { ($0.col, $0.row) }
     }
-
-    // MARK: - A* pathfinding (avoids local minima near water/impassable tiles)
-    func aStarPath(from start: (col: Int, row: Int), to goal: (col: Int, row: Int)) -> [(Int, Int)] {
+    
+    
+    // MARK: - A* pathfinding (avoids local minima near water/impassable tiles) and avoids occupied tiles
+    func aStarPath(from start: (col: Int, row: Int), to goal: (col: Int, row: Int), occupied: Set<Offset>) -> [(Int, Int)] {
         let startKey = Offset(col: start.col, row: start.row)
         let goalKey  = Offset(col: goal.col,  row: goal.row)
         if startKey == goalKey { return [ (start.col, start.row) ] }
-
-        // gScore: cost from start; fScore: g + heuristic
+        
+        // If the goal itself is occupied (by another unit), no legal path (no stacking).
+        if occupied.contains(goalKey) { return [] }
+        
         var gScore: [Offset: Int] = [ startKey: 0 ]
         var fScore: [Offset: Int] = [ startKey: cubeDistance(cubeFrom(col: start.col, row: start.row),
                                                              cubeFrom(col: goal.col,  row: goal.row)) ]
         var cameFrom: [Offset: Offset] = [:]
-
-        // Open set: Offsets to visit; we use a simple array and pick the min fScore each loop
         var openSet: Set<Offset> = [ startKey ]
-
+        
         while !openSet.isEmpty {
-            // current = node in openSet with lowest fScore
             let current: Offset = openSet.min(by: { (lhs, rhs) in
                 (fScore[lhs] ?? Int.max) < (fScore[rhs] ?? Int.max)
             })!
-
+            
             if current == goalKey {
-                // reconstruct path
                 var path: [Offset] = [current]
                 var c = current
                 while let prev = cameFrom[c] { path.append(prev); c = prev }
                 path.reverse()
                 return path.map { ($0.col, $0.row) }
             }
-
+            
             openSet.remove(current)
             let currentG = gScore[current] ?? Int.max
-
-            for nb in walkableNeighbors(col: current.col, row: current.row) {
+            
+            for nb in walkableUnoccupiedNeighbors(col: current.col, row: current.row, occupied: occupied) {
                 let nbKey = Offset(col: nb.col, row: nb.row)
-                let tentativeG = currentG + 1 // uniform cost per step
+                let tentativeG = currentG + 1
                 if tentativeG < (gScore[nbKey] ?? Int.max) {
                     cameFrom[nbKey] = current
                     gScore[nbKey] = tentativeG
@@ -161,7 +187,6 @@ private extension GameScene {
                 }
             }
         }
-        // No path
         return []
     }
 }
@@ -473,6 +498,11 @@ class GameScene: SKScene {
             let hintMap   = baseMap.convert(hintWorld, from: worldNode)
             let target    = (baseMap.tileColumnIndex(fromPosition: hintMap),
                              baseMap.tileRowIndex(fromPosition: hintMap))
+            // Enforce no-stacking at the destination
+            if isTileOccupied(col: target.0, row: target.1, excluding: movingUnit) {
+                return
+            }
+            
             clearMoveHighlights()
             moveUnit(movingUnit, toCol: target.0, row: target.1) { [weak self] in self?.endTurn() }
             return
@@ -511,8 +541,11 @@ class GameScene: SKScene {
         guard let unit = selectedUnit else { return }
         let mp = movementPoints(for: unit)
 
+        
+        let occ = occupiedOffsets(excluding: unit)
+        
         // Compute reachable tiles (includes start); filter out the start tile.
-        let reachable = reachableTiles(from: start, movePoints: mp)
+        let reachable = reachableTiles(from: start, movePoints: mp, occupied: occ)
             .filter { !($0.0 == start.col && $0.1 == start.row) }
 
         // Render hints
@@ -575,14 +608,33 @@ class GameScene: SKScene {
             let mp = movementPoints(for: unit)
 
             // Use A* to find a path around obstacles (e.g., water); then take up to `mp` steps this turn.
-            let path = aStarPath(from: start, to: g)
-            if path.count >= 2 {
-                // path includes start; move along up to `mp` steps
-                let stepsToTake = min(mp, path.count - 1)
-                let targetIdx = path[stepsToTake]
+            // Avoid occupied tiles entirely. If the goal is occupied (it is, by the blue unit),
+            // choose the best adjacent, unoccupied approach tile instead.
+            let occ = occupiedOffsets(excluding: unit)
+
+            // Candidates: all unoccupied, walkable neighbors around the goal
+            let goalNeighbors = walkableUnoccupiedNeighbors(col: g.0, row: g.1, occupied: occ)
+
+            // Choose the neighbor that yields the shortest A* path from start. If ties, pick closer to the true goal.
+            var bestPath: [(Int, Int)] = []
+            for cand in goalNeighbors {
+                let p = aStarPath(from: start, to: cand, occupied: occ)
+                if p.isEmpty { continue }
+                if bestPath.isEmpty || p.count < bestPath.count {
+                    bestPath = p
+                } else if !bestPath.isEmpty && p.count == bestPath.count {
+                    let d1 = cubeDistance(cubeFrom(col: bestPath.last!.0, row: bestPath.last!.1), cubeFrom(col: g.0, row: g.1))
+                    let d2 = cubeDistance(cubeFrom(col: cand.0, row: cand.1), cubeFrom(col: g.0, row: g.1))
+                    if d2 < d1 { bestPath = p }
+                }
+            }
+
+            if bestPath.count >= 2 {
+                let stepsToTake = min(mp, bestPath.count - 1)
+                let targetIdx = bestPath[stepsToTake]
                 moveUnit(unit, toCol: targetIdx.0, row: targetIdx.1) { [weak self] in self?.endTurn() }
             } else {
-                // No path or already at goal
+                // Nowhere legal to go
                 endTurn()
             }
         } else {
@@ -595,6 +647,13 @@ class GameScene: SKScene {
     /// Animates `unit` to the tile at `(col,row)` and invokes `completion`
     /// when the short move action finishes. Sets `isAnimatingMove` to gate input.
     func moveUnit(_ unit: SKSpriteNode, toCol col: Int, row: Int, completion: @escaping () -> Void) {
+        
+        // Enforce no stacking at runtime
+        if isTileOccupied(col: col, row: row, excluding: unit) {
+            completion()
+            return
+        }
+        
         let pWorld = worldPointForTile(col: col, row: row)
         isAnimatingMove = true
         unit.run(.move(to: pWorld, duration: 0.25)) { [weak self] in
