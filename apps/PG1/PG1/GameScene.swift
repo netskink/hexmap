@@ -264,6 +264,102 @@ private extension GameScene {
         }
         return []
     }
+    
+    
+    // MARK: - Health Bar (UI.sks-driven)
+
+    /// Clone the HealthBar prototype from UI.sks. Falls back to nil if not found.
+    func makeHealthBarInstance() -> SKNode? {
+        guard let proto = uiRoot?.childNode(withName: "//HealthBar")?.copy() as? SKNode else {
+            return nil
+        }
+        proto.name = "HealthBar"
+        (proto as? SKSpriteNode)?.zPosition = 1000
+        proto.zPosition = 1000
+        return proto
+    }
+
+    /// Position the health bar just above the unit sprite
+    func positionHealthBar(_ bar: SKNode, over unit: SKSpriteNode) {
+        let offset: CGFloat = (unit.size.height * 0.5) + 10
+        bar.position = CGPoint(x: 0, y: offset)
+    }
+
+    /// Attach a health bar to a unit if not already present. Uses UI.sks if available; otherwise creates a simple fallback.
+    func addHealthBar(to unit: SKSpriteNode) {
+        if unit.childNode(withName: "HealthBar") != nil { return }
+
+        if let hb = makeHealthBarInstance() {
+            // Ensure fill anchor & alignment are correct regardless of editor tweaks
+            if let bg = hb.childNode(withName: "bg") as? SKSpriteNode,
+               let fill = hb.childNode(withName: "fill") as? SKSpriteNode {
+                fill.anchorPoint = CGPoint(x: 0, y: 0.5)
+                let inset = (bg.size.width - fill.size.width) * 0.5
+                fill.position = CGPoint(x: -bg.size.width * 0.5 + inset, y: 0)
+                fill.colorBlendFactor = 1.0
+            }
+            // Position using UI.sks override if provided (HealthBar.userData["YOffset"] as Number)
+            if let yNum = hb.userData?["YOffset"] as? NSNumber {
+                hb.position = CGPoint(x: 0, y: CGFloat(truncating: yNum))
+            } else {
+                positionHealthBar(hb, over: unit)
+            }
+            unit.addChild(hb)
+            return
+        }
+
+        // Fallback if UI.sks is missing or HealthBar not found
+        let hbFallback = SKNode(); hbFallback.name = "HealthBar"; hbFallback.zPosition = 1000
+        let bg = SKSpriteNode(color: SKColor(white: 0, alpha: 0.35), size: CGSize(width: 48, height: 8))
+        bg.name = "bg"; bg.zPosition = 0
+        let fill = SKSpriteNode(color: SKColor.green, size: CGSize(width: 46, height: 6))
+        fill.name = "fill"; fill.zPosition = 1; fill.anchorPoint = CGPoint(x: 0, y: 0.5)
+        fill.position = CGPoint(x: -bg.size.width * 0.5 + (bg.size.width - fill.size.width) * 0.5, y: 0)
+        fill.colorBlendFactor = 1.0
+        hbFallback.addChild(bg)
+        hbFallback.addChild(fill)
+        positionHealthBar(hbFallback, over: unit)
+        unit.addChild(hbFallback)
+    }
+
+    /// Update the bar scale and color according to HP/MaxHP in unit.userData
+    func updateHealthBar(for unit: SKSpriteNode) {
+        guard let hb = unit.childNode(withName: "HealthBar"),
+              let fill = hb.childNode(withName: "fill") as? SKSpriteNode else { return }
+        let maxHP = (unit.userData?["MaxHP"] as? NSNumber)?.doubleValue ?? 100
+        let hp    = (unit.userData?["HP"] as? NSNumber)?.doubleValue ?? maxHP
+        let pct   = CGFloat(max(0.0, min(1.0, hp / maxHP)))
+
+        fill.xScale = max(pct, 0.001) // avoid collapsing to 0
+        fill.colorBlendFactor = 1.0
+        fill.color = colorForHealth(pct)
+    }
+
+    /// Green -> Yellow -> Red gradient for health percent [0,1]
+    func colorForHealth(_ pct: CGFloat) -> SKColor {
+        func lerp(_ a: CGFloat, _ b: CGFloat, _ t: CGFloat) -> CGFloat { a + (b - a) * t }
+        if pct >= 0.5 {
+            let t = (1.0 - pct) / 0.5 // 0 at 1.0 to 1 at 0.5
+            return SKColor(red: lerp(0, 1, t), green: 1, blue: 0, alpha: 1)
+        } else {
+            let t = pct / 0.5 // 0 at 0 to 1 at 0.5
+            return SKColor(red: 1, green: lerp(0, 1, t), blue: 0, alpha: 1)
+        }
+    }
+
+    /// Adjust HP by a damage amount; updates bar and removes the unit on death.
+    func applyDamage(_ amount: Int, to unit: SKSpriteNode) {
+        let maxHP = (unit.userData?["MaxHP"] as? NSNumber)?.intValue ?? 100
+        var hp    = (unit.userData?["HP"] as? NSNumber)?.intValue ?? maxHP
+        let dmg   = max(0, amount)
+        hp = max(0, hp - dmg)
+        unit.userData?["HP"] = hp
+        updateHealthBar(for: unit)
+        if hp <= 0 {
+            unit.run(.sequence([.fadeOut(withDuration: 0.2), .removeFromParent()]))
+        }
+    }
+    
 }
 
 
@@ -315,6 +411,12 @@ class GameScene: SKScene {
     var redUnits: [SKSpriteNode] = []
     var selectedUnit: SKSpriteNode?
     private var aiUnitTurnIndex: Int = 0
+    
+    // MARK: - UI Prototypes (from UI.sks)
+    private lazy var uiRoot: SKNode? = {
+        // Loads UI.sks once; used to clone HUD elements like the HealthBar
+        return SKNode(fileNamed: "UI")
+    }()
 
     // MARK: UI / Highlights
 
@@ -457,6 +559,11 @@ class GameScene: SKScene {
         case .player: blueUnits.append(sprite)
         case .computer: redUnits.append(sprite)
         }
+        
+        // Attach and initialize a health bar for this unit
+        addHealthBar(to: sprite)
+        updateHealthBar(for: sprite)
+        
 
         return sprite
     }
@@ -762,3 +869,4 @@ class GameScene: SKScene {
 
 
 }
+
