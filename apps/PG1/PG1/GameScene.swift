@@ -432,6 +432,10 @@ class GameScene: SKScene {
     let highlightName = "moveHint"
     /// Texture asset name used for hint sprites.
     let highlightTextureName = "whitebe"
+    /// Node.name used to tag attackable (adjacent enemy) hint sprites.
+    let attackHighlightName = "attackHint"
+    /// Texture asset name used for attack hint sprites.
+    let attackHighlightTextureName = "redbe"
 
     // MARK: State
 
@@ -728,7 +732,7 @@ class GameScene: SKScene {
         let reachable = reachableTiles(for: unit, from: start, movePoints: mp, occupied: occ)
             .filter { !($0.0 == start.col && $0.1 == start.row) }
 
-        // Render hints
+        // Render move hints
         for (c, r) in reachable {
             let hint = SKSpriteNode(texture: SKTexture(imageNamed: highlightTextureName))
             hint.name = highlightName
@@ -736,6 +740,27 @@ class GameScene: SKScene {
             hint.position = worldNode.convert(baseMap.centerOfTile(atColumn: c, row: r), from: baseMap)
             overlayNode.addChild(hint)
             highlightNodes.append(hint)
+        }
+
+        // Render attack hints (adjacent enemy-occupied tiles only).
+        // Build a fast lookup set of red unit tile indices.
+        var redSet = Set<Offset>()
+        for enemy in redUnits {
+            let idx = tileIndex(of: enemy)
+            redSet.insert(Offset(col: idx.col, row: idx.row))
+        }
+        // Adjacent (nearest-neighbor) tiles from the selected unit's start.
+        let adjacents = offsetNeighbors(col: start.col, row: start.row)
+            .filter { inBounds(col: $0.col, row: $0.row) }
+
+        for (c, r) in adjacents where redSet.contains(Offset(col: c, row: r)) {
+            let attackHint = SKSpriteNode(texture: SKTexture(imageNamed: attackHighlightTextureName))
+            attackHint.name = attackHighlightName
+            attackHint.alpha = 0.95
+            attackHint.zPosition = 1001  // ensure it's above white move hints
+            attackHint.position = worldNode.convert(baseMap.centerOfTile(atColumn: c, row: r), from: baseMap)
+            overlayNode.addChild(attackHint)
+            highlightNodes.append(attackHint)
         }
     }
 
