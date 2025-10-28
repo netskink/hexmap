@@ -384,6 +384,9 @@ enum Team { case player, computer }
 ///   - Player taps a hint → move unit → `endTurn()`
 ///   - Computer runs a BFS step toward the player, then `endTurn()`
 class GameScene: SKScene {
+    
+    // Debug logging toggle
+    let debugTurnLogs = true
 
     // MARK: Nodes
 
@@ -664,6 +667,37 @@ class GameScene: SKScene {
     func worldPointForTile(col: Int, row: Int) -> CGPoint {
         worldNode.convert(baseMap.centerOfTile(atColumn: col, row: row), from: baseMap)
     }
+    
+    
+    func playMuzzleFlash(at point: CGPoint, on parent: SKNode) {
+        var frames: [SKTexture] = []
+        for i in 1...8 { frames.append(SKTexture(imageNamed: String(format: "muzzle_%04d", i))) }
+        let sprite = SKSpriteNode(texture: frames.first)
+        sprite.zPosition = 1200
+        sprite.position = point
+        parent.addChild(sprite)
+        // Slower, brighter muzzle flash
+        sprite.blendMode = .add
+        let anim = SKAction.animate(with: frames, timePerFrame: 0.08, resize: false, restore: false)
+        let scaleUp = SKAction.scale(to: 1.2, duration: 0.08 * Double(frames.count) * 0.4)
+        let fadeOut = SKAction.fadeOut(withDuration: 0.1)
+        sprite.run(.sequence([.group([anim, scaleUp]), fadeOut, .removeFromParent()]))
+    }
+
+    func playExplosion(at point: CGPoint, on parent: SKNode) {
+        var frames: [SKTexture] = []
+        for i in 1...12 { frames.append(SKTexture(imageNamed: String(format: "explosion_%04d", i))) }
+        let sprite = SKSpriteNode(texture: frames.first)
+        sprite.zPosition = 1200
+        sprite.position = point
+        parent.addChild(sprite)
+        // Slightly longer explosion for readability
+        sprite.blendMode = .add
+        let anim = SKAction.animate(with: frames, timePerFrame: 0.07, resize: false, restore: false)
+        let scaleUp = SKAction.scale(to: 1.25, duration: 0.07 * Double(frames.count) * 0.6)
+        let fadeOut = SKAction.fadeOut(withDuration: 0.12)
+        sprite.run(.sequence([.group([anim, scaleUp]), fadeOut, .removeFromParent()]))
+    }
 
     // MARK: - Touches
 
@@ -675,6 +709,8 @@ class GameScene: SKScene {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard currentTurn == .player, !isAnimatingMove, let touch = touches.first else { return }
         let scenePt = touch.location(in: self)
+        
+        if debugTurnLogs { print("👆 touchesEnded at \(scenePt), turn=\(currentTurn), anim=\(isAnimatingMove)") }
 
         // 0) If an attack hint was tapped, perform an attack (no move), then end turn.
         if let attackNode = nodes(at: scenePt).first(where: { $0.name == attackHighlightName }) as? SKSpriteNode,
@@ -687,8 +723,15 @@ class GameScene: SKScene {
             let target    = (baseMap.tileColumnIndex(fromPosition: hintMap),
                              baseMap.tileRowIndex(fromPosition: hintMap))
             
+            if debugTurnLogs { print("➡️ Attack tap detected") }
+            
             // Print who is attacking (human / player turn here by guard)
             print("🗡️ Player attack initiated by blue unit at target tile (\(target.0), \(target.1))")
+
+            // FX: muzzle flash on attacker (world space), explosion on target hex center (world space)
+            playMuzzleFlash(at: actingUnit.position, on: worldNode)
+            let targetWorld = worldPointForTile(col: target.0, row: target.1)
+            playExplosion(at: targetWorld, on: worldNode)
             
             clearMoveHighlights()
             // No movement; attacking consumes the action. End the player's turn.
@@ -709,6 +752,8 @@ class GameScene: SKScene {
             if isTileOccupied(col: target.0, row: target.1, excluding: movingUnit) {
                 return
             }
+            
+            if debugTurnLogs { print("➡️ Move tap detected; target=\(target)") }
             
             clearMoveHighlights()
             moveUnit(movingUnit, toCol: target.0, row: target.1) { [weak self] in self?.endTurn() }
@@ -798,7 +843,11 @@ class GameScene: SKScene {
         case .player:
             currentTurn = .computer
             enablePlayerInput(false)
-            runComputerTurn()
+            if debugTurnLogs { print("🔁 Switching to Computer turn…") }
+            // Defer AI start slightly to avoid re-entrancy with SKAction completions / FX
+            run(.wait(forDuration: 0.05)) { [weak self] in
+                self?.runComputerTurn()
+            }
         case .computer:
             currentTurn = .player
             enablePlayerInput(true)
@@ -813,6 +862,9 @@ class GameScene: SKScene {
     ///   one tile toward the blue unit; otherwise ends its turn.
     func runComputerTurn() {
         guard !redUnits.isEmpty else { endTurn(); return }
+        
+        if debugTurnLogs { print("🤖 Computer turn starting (reds=\(redUnits.count))") }
+        
 
         // Choose the next red unit in a round-robin sequence.
         let unit = redUnits[aiUnitTurnIndex % redUnits.count]
@@ -823,8 +875,13 @@ class GameScene: SKScene {
         let adjacentsToRed = offsetNeighbors(col: redIdx.col, row: redIdx.row)
             .filter { inBounds(col: $0.col, row: $0.row) }
         let bluePositions = Set(blueUnits.map { Offset(col: tileIndex(of: $0).col, row: tileIndex(of: $0).row) })
-        if adjacentsToRed.contains(where: { bluePositions.contains(Offset(col: $0.col, row: $0.row)) }) {
+        if let targetAdj = adjacentsToRed.first(where: { bluePositions.contains(Offset(col: $0.col, row: $0.row)) }) {
             print("🗡️ Computer attack initiated by red unit adjacent to (\(redIdx.col), \(redIdx.row))")
+            // FX: muzzle flash at attacker, explosion at target tile (both in world space)
+            playMuzzleFlash(at: worldPointForTile(col: redIdx.col, row: redIdx.row), on: worldNode)
+            let targetWorld = worldPointForTile(col: targetAdj.col, row: targetAdj.row)
+            playExplosion(at: targetWorld, on: worldNode)
+            if debugTurnLogs { print("🤖 AI attacking then ending turn") }
             endTurn()
             return
         }
@@ -882,9 +939,11 @@ class GameScene: SKScene {
                 moveUnit(unit, toCol: targetIdx.0, row: targetIdx.1) { [weak self] in self?.endTurn() }
             } else {
                 // Nowhere legal to go
+                if debugTurnLogs { print("🤖 AI found no path; ending turn") }
                 endTurn()
             }
         } else {
+            if debugTurnLogs { print("🤖 No blue targets; ending turn") }
             endTurn()
         }
     }
@@ -894,19 +953,46 @@ class GameScene: SKScene {
     /// Animates `unit` to the tile at `(col,row)` and invokes `completion`
     /// when the short move action finishes. Sets `isAnimatingMove` to gate input.
     func moveUnit(_ unit: SKSpriteNode, toCol col: Int, row: Int, completion: @escaping () -> Void) {
-        
         // Enforce no stacking at runtime
         if isTileOccupied(col: col, row: row, excluding: unit) {
             completion()
             return
         }
-        
+
         let pWorld = worldPointForTile(col: col, row: row)
+        
+        // If we're already at (or extremely close to) the destination, finish immediately.
+        let epsilon: CGFloat = 0.5
+        let dx = unit.position.x - pWorld.x
+        let dy = unit.position.y - pWorld.y
+        if abs(dx) < epsilon && abs(dy) < epsilon {
+            if debugTurnLogs { print("🟰 Already at destination (\(col), \(row)); skipping move") }
+            completion()
+            return
+        }
+        
+        // Ensure no lingering actions block completion and no nodes are paused.
+        unit.removeAllActions()
+        unit.isPaused = false
+        worldNode.isPaused = false
+        self.isPaused = false
+        
         isAnimatingMove = true
-        unit.run(.move(to: pWorld, duration: 0.25)) { [weak self] in
-            self?.isAnimatingMove = false
+        if debugTurnLogs {
+            let parentName = unit.parent?.name ?? "nil"
+            print("🚚 Begin move to (\(col), \(row)) from \(unit.position) → \(pWorld) (parent=\(parentName))")
+        }
+        
+        // Use an explicit sequence to guarantee the completion runs.
+        let move = SKAction.move(to: pWorld, duration: 0.25)
+        move.timingMode = .easeInEaseOut
+        let finished = SKAction.run { [weak self] in
+            guard let self = self else { return }
+            self.isAnimatingMove = false
+            if self.debugTurnLogs { print("✅ Move finished at (\(col), \(row)) pos=\(unit.position)") }
             completion()
         }
+        unit.run(.sequence([move, finished]), withKey: "MoveUnit")
     }
     
     // MARK: - Turn flow API called from HUD
