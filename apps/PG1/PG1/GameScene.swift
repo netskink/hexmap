@@ -676,6 +676,26 @@ class GameScene: SKScene {
         guard currentTurn == .player, !isAnimatingMove, let touch = touches.first else { return }
         let scenePt = touch.location(in: self)
 
+        // 0) If an attack hint was tapped, perform an attack (no move), then end turn.
+        if let attackNode = nodes(at: scenePt).first(where: { $0.name == attackHighlightName }) as? SKSpriteNode,
+           let actingUnit = selectedUnit {
+            // Determine the map tile that was attacked
+            let hintWorld = attackNode.parent == overlayNode
+                ? overlayNode.convert(attackNode.position, to: worldNode)
+                : attackNode.parent!.convert(attackNode.position, to: worldNode)
+            let hintMap   = baseMap.convert(hintWorld, from: worldNode)
+            let target    = (baseMap.tileColumnIndex(fromPosition: hintMap),
+                             baseMap.tileRowIndex(fromPosition: hintMap))
+            
+            // Print who is attacking (human / player turn here by guard)
+            print("🗡️ Player attack initiated by blue unit at target tile (\(target.0), \(target.1))")
+            
+            clearMoveHighlights()
+            // No movement; attacking consumes the action. End the player's turn.
+            endTurn()
+            return
+        }
+
         // 1) If a highlight was tapped, move the selected unit there (convert from overlay -> world -> map safely)
         if let tapped = nodes(at: scenePt).first(where: { $0.name == highlightName }) as? SKSpriteNode,
            let movingUnit = selectedUnit {
@@ -798,15 +818,25 @@ class GameScene: SKScene {
         let unit = redUnits[aiUnitTurnIndex % redUnits.count]
         aiUnitTurnIndex += 1
 
+        // If any blue unit is adjacent, perform an attack instead of moving.
+        let redIdx = tileIndex(of: unit)
+        let adjacentsToRed = offsetNeighbors(col: redIdx.col, row: redIdx.row)
+            .filter { inBounds(col: $0.col, row: $0.row) }
+        let bluePositions = Set(blueUnits.map { Offset(col: tileIndex(of: $0).col, row: tileIndex(of: $0).row) })
+        if adjacentsToRed.contains(where: { bluePositions.contains(Offset(col: $0.col, row: $0.row)) }) {
+            print("🗡️ Computer attack initiated by red unit adjacent to (\(redIdx.col), \(redIdx.row))")
+            endTurn()
+            return
+        }
+
         // Pick a goal: the nearest blue unit by true hex (cube) distance.
         func distance(_ a: (Int, Int), _ b: (Int, Int)) -> Int {
             let ca = cubeFrom(col: a.0, row: a.1)
             let cb = cubeFrom(col: b.0, row: b.1)
             return cubeDistance(ca, cb)
         }
-        let redPos = tileIndex(of: unit)
         let blueTargets = blueUnits.map { tileIndex(of: $0) }
-        let goal = blueTargets.min(by: { distance(redPos, $0) < distance(redPos, $1) })
+        let goal = blueTargets.min(by: { distance(redIdx, $0) < distance(redIdx, $1) })
 
         if let g = goal {
             let start = tileIndex(of: unit)
