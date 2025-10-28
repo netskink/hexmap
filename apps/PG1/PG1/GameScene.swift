@@ -96,17 +96,17 @@ private extension GameScene {
     }
     
     // MARK: - Motorized rules helpers
-    /// Returns true if the given unit should use the motorized rule set (Armor/MechanizedInfantry/MotorizedInfantry).
+    /// Returns true if this unit is marked motorized via userData["IsMotorized"].
+    /// Accepts NSNumber(0/1), Bool, or String "0"/"1"/"true"/"false" (case-insensitive).
     func isMotorizedUnit(_ node: SKSpriteNode) -> Bool {
-        // Our spawnUnit() sets name as "<PrototypeName>_<UUID>", so use the prefix
-        guard let name = node.name else { return false }
-        let type = name.split(separator: "_").first.map(String.init) ?? ""
-        switch type {
-        case "Armor", "MechanizedInfantry", "MotorizedInfantry":
-            return true
-        default:
-            return false
+        guard let ud = node.userData else { return false }
+        if let n = ud["IsMotorized"] as? NSNumber { return n.intValue != 0 }
+        if let b = ud["IsMotorized"] as? Bool { return b }
+        if let s = ud["IsMotorized"] as? String {
+            let v = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return v == "1" || v == "true" || v == "yes"
         }
+        return false
     }
 
     /// Checks the tile definition userData for key "AM" and returns true only when AM == 1.
@@ -136,12 +136,13 @@ private extension GameScene {
     }
 
     /// Neighbor generator that applies walkability + occupancy and the motorized rule.
-    /// For motorized units (Armor/MechanizedInfantry/MotorizedInfantry), a neighbor is allowed if
+    /// Motorized status comes from unit.userData["IsMotorized"] (see isMotorizedUnit(_:)).
+    /// For motorized units, a neighbor is allowed if:
     ///   - it is in-bounds
     ///   - it is not occupied
-    ///   - If AM == 0 on the tile: forbid (even if walkable)
+    ///   - If tile userData["AM"] == 0: forbid (even if walkable)
     ///   - Else allow if (baseMap.isWalkable == true) OR (AM == 1)
-    /// For all other units, the neighbor must satisfy baseMap.isWalkable == true.
+    /// For non-motorized units, the neighbor must satisfy baseMap.isWalkable == true.
     func allowedNeighborTiles(for unit: SKSpriteNode,
                               from col: Int,
                               row: Int,
@@ -791,7 +792,8 @@ class GameScene: SKScene {
             // choose the best adjacent, unoccupied approach tile instead.
             let occ = occupiedOffsets(excluding: unit)
 
-            // Candidates: all unoccupied neighbors around the goal that are legal for this unit (walkable OR AM == false if motorized)
+            // Candidates: all unoccupied neighbors around the goal that are legal for this unit
+            // (non-motorized: walkable; motorized: walkable OR AM == 1, and rejected if AM == 0).
             let allNbrs = offsetNeighbors(col: g.0, row: g.1)
                 .filter { inBounds(col: $0.col, row: $0.row) }
                 .filter { !occ.contains(Offset(col: $0.col, row: $0.row)) }
