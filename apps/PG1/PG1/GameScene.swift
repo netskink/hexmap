@@ -164,6 +164,31 @@ private extension GameScene {
             }
     }
 
+    // MARK: - Combat helpers
+    /// Reads an integer combat factor from unit.userData["CombatFactor"]. Defaults to 1 if missing/invalid.
+    func combatFactor(for unit: SKSpriteNode) -> Int {
+        guard let ud = unit.userData else { return 1 }
+        if let n = ud["CombatFactor"] as? NSNumber { return max(1, n.intValue) }
+        if let i = ud["CombatFactor"] as? Int { return max(1, i) }
+        if let s = ud["CombatFactor"] as? String, let i = Int(s.trimmingCharacters(in: .whitespacesAndNewlines)) { return max(1, i) }
+        return 1
+    }
+
+    /// Greatest common divisor for reducing odds ratios.
+    func gcd(_ a: Int, _ b: Int) -> Int {
+        var x = abs(a), y = abs(b)
+        while y != 0 { let t = x % y; x = y; y = t }
+        return max(1, x)
+    }
+
+    /// Returns an odds string like "1:2", "2:1" by reducing the attacker:defender ratio.
+    func oddsString(attacker atk: SKSpriteNode, defender def: SKSpriteNode) -> String {
+        let a = max(1, combatFactor(for: atk))
+        let d = max(1, combatFactor(for: def))
+        let g = gcd(a, d)
+        return "\(a / g):\(d / g)"
+    }
+
     // MARK: - Occupancy helpers
     /// Returns true if a unit (other than `excluding`) occupies the (col,row).
     func isTileOccupied(col: Int, row: Int, excluding: SKSpriteNode? = nil) -> Bool {
@@ -280,6 +305,16 @@ private extension GameScene {
         return proto
     }
 
+    /// Clone the AttackHint prototype from UI.sks. Falls back to nil if not found.
+    func makeAttackHintInstance() -> SKNode? {
+        guard let proto = uiRoot?.childNode(withName: "//AttackHint")?.copy() as? SKNode else {
+            return nil
+        }
+        proto.name = attackHighlightName
+        proto.zPosition = 1001
+        return proto
+    }
+
     /// Position the health bar just above the unit sprite
     func positionHealthBar(_ bar: SKNode, over unit: SKSpriteNode) {
         let offset: CGFloat = (unit.size.height * 0.5) + 10
@@ -388,6 +423,9 @@ class GameScene: SKScene {
     // Debug logging toggle
     let debugTurnLogs = true
 
+    /// Delay between player ending turn and AI starting (seconds)
+    let aiTurnDelay: TimeInterval = 0.6
+
     // MARK: Nodes
 
     /// Root container for all world content (map, units, overlays).
@@ -428,8 +466,8 @@ class GameScene: SKScene {
     /// Separate from the map so hints aren’t affected by per-tile z ordering.
     var overlayNode: SKNode!
 
-    /// Currently active hint sprites (named `highlightName`).
-    var highlightNodes: [SKSpriteNode] = []
+    /// Currently active hint nodes (move + attack). Tracked for full cleanup.
+    var highlightNodes: [SKNode] = []
 
     /// Node.name used to detect taps on move hints.
     let highlightName = "moveHint"
@@ -439,6 +477,8 @@ class GameScene: SKScene {
     let attackHighlightName = "attackHint"
     /// Texture asset name used for attack hint sprites.
     let attackHighlightTextureName = "redbe"
+    /// Enemy units temporarily dimmed while attack hints are visible
+    private var dimmedTargets: [SKSpriteNode] = []
 
     // MARK: State
 
@@ -728,31 +768,43 @@ class GameScene: SKScene {
         
         if debugTurnLogs { print("👆 touchesEnded at \(scenePt), turn=\(currentTurn), anim=\(isAnimatingMove)") }
 
-        // 0) If an attack hint was tapped, perform an attack (no move), then end turn.
-        if let attackNode = nodes(at: scenePt).first(where: { $0.name == attackHighlightName }) as? SKSpriteNode,
-           let actingUnit = selectedUnit {
-            // Determine the map tile that was attacked
-            let hintWorld = attackNode.parent == overlayNode
-                ? overlayNode.convert(attackNode.position, to: worldNode)
-                : attackNode.parent!.convert(attackNode.position, to: worldNode)
-            let hintMap   = baseMap.convert(hintWorld, from: worldNode)
-            let target    = (baseMap.tileColumnIndex(fromPosition: hintMap),
-                             baseMap.tileRowIndex(fromPosition: hintMap))
-            
-            if debugTurnLogs { print("➡️ Attack tap detected") }
-            
-            // Print who is attacking (human / player turn here by guard)
-            print("🗡️ Player attack initiated by blue unit at target tile (\(target.0), \(target.1))")
+        // 0) If an attack hint (or any of its children) was tapped, perform an attack (no move), then end turn.
+        if let actingUnit = selectedUnit {
+            // Find any node under the touch, then climb ancestors to find an AttackHint container
+            if let touched = nodes(at: scenePt).first {
+                var node: SKNode? = touched
+                var attackNode: SKNode?
+                while let n = node {
+                    if n.name == attackHighlightName { attackNode = n; break }
+                    node = n.parent
+                }
+                if let attackNode = attackNode {
+                    // Determine the map tile that was attacked
+                    let hintWorld: CGPoint
+                    if attackNode.parent === overlayNode {
+                        hintWorld = overlayNode.convert(attackNode.position, to: worldNode)
+                    } else if let p = attackNode.parent {
+                        hintWorld = p.convert(attackNode.position, to: worldNode)
+                    } else {
+                        hintWorld = attackNode.position
+                    }
+                    let hintMap   = baseMap.convert(hintWorld, from: worldNode)
+                    let target    = (baseMap.tileColumnIndex(fromPosition: hintMap),
+                                     baseMap.tileRowIndex(fromPosition: hintMap))
 
-            // FX: muzzle flash on attacker (world space), explosion on target hex center (world space)
-            playMuzzleFlash(at: actingUnit.position, on: worldNode)
-            let targetWorld = worldPointForTile(col: target.0, row: target.1)
-            playExplosion(at: targetWorld, on: worldNode)
-            
-            clearMoveHighlights()
-            // No movement; attacking consumes the action. End the player's turn.
-            endTurn()
-            return
+                    if debugTurnLogs { print("➡️ Attack tap detected") }
+                    print("🗡️ Player attack initiated by blue unit at target tile (\(target.0), \(target.1))")
+
+                    // FX
+                    playMuzzleFlash(at: actingUnit.position, on: worldNode)
+                    let targetWorld = worldPointForTile(col: target.0, row: target.1)
+                    playExplosion(at: targetWorld, on: worldNode)
+
+                    clearMoveHighlights()
+                    endTurn()
+                    return
+                }
+            }
         }
 
         // 1) If a highlight was tapped, move the selected unit there (convert from overlay -> world -> map safely)
@@ -799,6 +851,12 @@ class GameScene: SKScene {
     func clearMoveHighlights() {
         highlightNodes.forEach { $0.removeFromParent() }
         highlightNodes.removeAll()
+        // Restore any units we dimmed for readability
+        for u in dimmedTargets {
+            u.removeAction(forKey: "DimForAttackHint")
+            u.run(.fadeAlpha(to: 1.0, duration: 0.08))
+        }
+        dimmedTargets.removeAll()
     }
 
     /// Displays move hint sprites on all **reachable tiles** within the selected unit's movement points.
@@ -824,24 +882,51 @@ class GameScene: SKScene {
         }
 
         // Render attack hints (adjacent enemy-occupied tiles only).
-        // Build a fast lookup set of red unit tile indices.
-        var redSet = Set<Offset>()
+        // Build a fast lookup map of red unit tile indices → unit node.
+        var redAt: [Offset: SKSpriteNode] = [:]
         for enemy in redUnits {
             let idx = tileIndex(of: enemy)
-            redSet.insert(Offset(col: idx.col, row: idx.row))
+            redAt[Offset(col: idx.col, row: idx.row)] = enemy
         }
+
         // Adjacent (nearest-neighbor) tiles from the selected unit's start.
         let adjacents = offsetNeighbors(col: start.col, row: start.row)
             .filter { inBounds(col: $0.col, row: $0.row) }
 
-        for (c, r) in adjacents where redSet.contains(Offset(col: c, row: r)) {
-            let attackHint = SKSpriteNode(texture: SKTexture(imageNamed: attackHighlightTextureName))
-            attackHint.name = attackHighlightName
-            attackHint.alpha = 0.95
-            attackHint.zPosition = 1001  // ensure it's above white move hints
-            attackHint.position = worldNode.convert(baseMap.centerOfTile(atColumn: c, row: r), from: baseMap)
-            overlayNode.addChild(attackHint)
-            highlightNodes.append(attackHint)
+        // Use the AttackHint prototype from UI.sks (with built-in shadows and layout)
+        for (c, r) in adjacents {
+            let key = Offset(col: c, row: r)
+            guard let defender = redAt[key] else { continue }
+            guard let hint = makeAttackHintInstance() else { continue }
+
+            // Position centered on the target tile
+            hint.position = worldNode.convert(baseMap.centerOfTile(atColumn: c, row: r), from: baseMap)
+            hint.alpha = 0.98
+
+            // Update odds text on both label and its shadow, if present
+            let odds = oddsString(attacker: unit, defender: defender)
+            if let label = hint.childNode(withName: "oddsLabel") as? SKLabelNode {
+                label.text = odds
+            }
+            if let shadow = hint.childNode(withName: "oddsLabelShadow") as? SKLabelNode {
+                shadow.text = odds
+            }
+
+            // Optional: scale to approximate tile size if the prototype provides a BaseDiameter in userData
+            // Otherwise, you can size the AttackHint visually in UI.sks and remove this block.
+            if let base = (hint.userData?["BaseDiameter"] as? NSNumber)?.doubleValue {
+                let target = Double(min(baseMap.tileSize.width, baseMap.tileSize.height) * 0.9)
+                let scale = CGFloat(max(0.1, target / base))
+                hint.setScale(scale)
+            }
+
+            // Dim the defender to make the red ring/odds stand out
+            defender.removeAction(forKey: "DimForAttackHint")
+            defender.run(.fadeAlpha(to: 0.35, duration: 0.08), withKey: "DimForAttackHint")
+            if !dimmedTargets.contains(defender) { dimmedTargets.append(defender) }
+
+            overlayNode.addChild(hint)
+            highlightNodes.append(hint)
         }
     }
 
@@ -860,8 +945,8 @@ class GameScene: SKScene {
             currentTurn = .computer
             enablePlayerInput(false)
             if debugTurnLogs { print("🔁 Switching to Computer turn…") }
-            // Defer AI start slightly to avoid re-entrancy with SKAction completions / FX
-            run(.wait(forDuration: 0.05)) { [weak self] in
+            // Defer AI start to create a readable inter-turn pause and avoid re-entrancy with SKAction completions / FX
+            run(.wait(forDuration: aiTurnDelay)) { [weak self] in
                 self?.runComputerTurn()
             }
         case .computer:
