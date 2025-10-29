@@ -723,6 +723,15 @@ class GameScene: SKScene {
         let fadeOut = SKAction.fadeOut(withDuration: 0.1)
         sprite.run(.sequence([.group([anim, scaleUp]), fadeOut, .removeFromParent()]))
     }
+    
+    func playSmokePuff(at point: CGPoint, on parent: SKNode) {
+        if let smoke = SKEmitterNode(fileNamed: "Smoke.sks") {
+            smoke.position = point
+            smoke.zPosition = 1190
+            parent.addChild(smoke)
+            smoke.run(.sequence([.wait(forDuration: 2.0), .removeFromParent()]))
+        }
+    }
 
     func playExplosion(at point: CGPoint, on parent: SKNode) {
         var frames: [SKTexture] = []
@@ -795,10 +804,12 @@ class GameScene: SKScene {
                     if debugTurnLogs { print("➡️ Attack tap detected") }
                     print("🗡️ Player attack initiated by blue unit at target tile (\(target.0), \(target.1))")
 
-                    // FX
+                    // FX (attacker + target)
                     playMuzzleFlash(at: actingUnit.position, on: worldNode)
+                    playSmokePuff(at: actingUnit.position, on: worldNode)   // smoke at attacker
                     let targetWorld = worldPointForTile(col: target.0, row: target.1)
                     playExplosion(at: targetWorld, on: worldNode)
+                    playSmokePuff(at: targetWorld, on: worldNode)          // smoke at target
 
                     clearMoveHighlights()
                     endTurn()
@@ -978,10 +989,13 @@ class GameScene: SKScene {
         let bluePositions = Set(blueUnits.map { Offset(col: tileIndex(of: $0).col, row: tileIndex(of: $0).row) })
         if let targetAdj = adjacentsToRed.first(where: { bluePositions.contains(Offset(col: $0.col, row: $0.row)) }) {
             print("🗡️ Computer attack initiated by red unit adjacent to (\(redIdx.col), \(redIdx.row))")
-            // FX: muzzle flash at attacker, explosion at target tile (both in world space)
-            playMuzzleFlash(at: worldPointForTile(col: redIdx.col, row: redIdx.row), on: worldNode)
+            // FX: muzzle flash + smoke at attacker, explosion + smoke at target (both in world space)
+            let attackerWorld = worldPointForTile(col: redIdx.col, row: redIdx.row)
             let targetWorld = worldPointForTile(col: targetAdj.col, row: targetAdj.row)
+            playMuzzleFlash(at: attackerWorld, on: worldNode)
+            playSmokePuff(at: attackerWorld, on: worldNode)    // smoke at attacker
             playExplosion(at: targetWorld, on: worldNode)
+            playSmokePuff(at: targetWorld, on: worldNode)      // smoke at target
             if debugTurnLogs { print("🤖 AI attacking then ending turn") }
             endTurn()
             return
