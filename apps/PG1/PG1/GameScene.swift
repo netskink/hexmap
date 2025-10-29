@@ -693,9 +693,25 @@ class GameScene: SKScene {
         parent.addChild(sprite)
         // Slightly longer explosion for readability
         sprite.blendMode = .add
-        let anim = SKAction.animate(with: frames, timePerFrame: 0.07, resize: false, restore: false)
-        let scaleUp = SKAction.scale(to: 1.25, duration: 0.07 * Double(frames.count) * 0.6)
+        let timePerFrame = 0.07
+        let anim = SKAction.animate(with: frames, timePerFrame: timePerFrame, resize: false, restore: false)
+        let scaleUp = SKAction.scale(to: 1.25, duration: timePerFrame * Double(frames.count) * 0.6)
         let fadeOut = SKAction.fadeOut(withDuration: 0.12)
+
+        // --- Explosion audio (Explosion.caf) ---
+        // Play the sound only for the visual duration (animation + fade), then remove the node.
+        let totalExplosionDuration = timePerFrame * Double(frames.count) + 0.12
+        let explosionAudio = SKAudioNode(fileNamed: "Explosion.caf")
+        explosionAudio.name = "ExplosionSFX"
+        explosionAudio.autoplayLooped = false
+        explosionAudio.isPositional = true
+        explosionAudio.position = point
+        parent.addChild(explosionAudio)
+        let playExplosion = SKAction.play()
+        let stopAndRemoveExplosion = SKAction.sequence([.wait(forDuration: totalExplosionDuration), .removeFromParent()])
+        explosionAudio.run(.sequence([playExplosion, stopAndRemoveExplosion]))
+
+        // Run visuals
         sprite.run(.sequence([.group([anim, scaleUp]), fadeOut, .removeFromParent()]))
     }
 
