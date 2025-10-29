@@ -984,15 +984,39 @@ class GameScene: SKScene {
         }
         
         // Use an explicit sequence to guarantee the completion runs.
-        let move = SKAction.move(to: pWorld, duration: 0.25)
+        let move = SKAction.move(to: pWorld, duration: 1.5)
         move.timingMode = .easeInEaseOut
+
+        // Clean up any lingering marching node from a previous move
+        unit.childNode(withName: "MarchSFX")?.removeFromParent()
+
+        // Play marching sound only for the duration of the move using SKAudioNode.
+        // Removing the node after `move.duration` cleanly stops playback even if the
+        // source file is longer.
+        let marchNode = SKAudioNode(fileNamed: "InfMarch.caf")
+        marchNode.name = "MarchSFX"
+        marchNode.autoplayLooped = true
+        marchNode.isPositional = false
+
+        let startSound = SKAction.run { [weak unit] in
+            guard let unit = unit else { return }
+            // Ensure no duplicate
+            unit.childNode(withName: "MarchSFX")?.removeFromParent()
+            unit.addChild(marchNode)
+        }
+        let stopSound = SKAction.run {
+            marchNode.removeFromParent()
+        }
+        let soundForMoveDuration = SKAction.sequence([startSound, .wait(forDuration: move.duration), stopSound])
+        let moveWithSound = SKAction.group([move, soundForMoveDuration])
+
         let finished = SKAction.run { [weak self] in
             guard let self = self else { return }
             self.isAnimatingMove = false
             if self.debugTurnLogs { print("✅ Move finished at (\(col), \(row)) pos=\(unit.position)") }
             completion()
         }
-        unit.run(.sequence([move, finished]), withKey: "MoveUnit")
+        unit.run(.sequence([moveWithSound, finished]), withKey: "MoveUnit")
     }
     
     // MARK: - Turn flow API called from HUD
