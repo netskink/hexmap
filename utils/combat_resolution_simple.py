@@ -1,39 +1,6 @@
-"""
-combat_resolution_simple.py
-
-Minimal combat resolver using your loss chart and a normalized 1–100 roll.
-- Odds are snapped to the nearest bracket in {1:3, 1:2, 1:1, 2:1, 3:1}
-  using nearest in log-space (fair around unity).
-- Each bracket shifts the mean μ of a Gaussian roll; σ is fixed.
-- Losses come from your z-band table with linear interpolation.
-- Bands are referenced to the *neutral* curve (μ0=50), as in your charts.
-
-No external dependencies (uses Python's random.gauss).
-"""
-
-from __future__ import annotations
-import math, random
+import random
+import math
 from dataclasses import dataclass
-from typing import Tuple, List
-
-# ---- Core setup ----
-MU0   = 50.0          # neutral mean for 1:1
-SIGMA = 16.5          # so ±3σ ≈ 1..100
-
-# Your loss table by z band
-TABLE_Z   = [-3,  -2,  -1,   0,   1,   2,   3]
-DEF_LOSS  = [ 3,   5,  10,  15,  20,  30,  40]  # percent
-ATT_LOSS  = [40,  30,  20,  15,  10,   5,   3]  # percent
-
-# Odds brackets (attacker:defender) and precomputed z-shifts:
-# z = Φ^{-1}(O/(1+O)); hard-coded to avoid SciPy.
-BRACKETS: List[Tuple[str, float, float]] = [
-    ("1:3", 1/3, -0.6745),
-    ("1:2", 1/2, -0.4307),
-    ("1:1", 1.0,  0.0000),
-    ("2:1", 2.0,  0.4307),
-    ("3:1", 3.0,  0.6745),
-]
 
 @dataclass
 class CombatResult:
@@ -42,77 +9,80 @@ class CombatResult:
     mu: float
     roll: float
     z_neutral: float
-    defender_loss_pct: float
-    attacker_loss_pct: float
+    defender_loss_pct: int
+    attacker_loss_pct: int
 
-def _nearest_bracket(ratio: float) -> Tuple[str, float, float]:
-    """Choose nearest odds bracket in log-space."""
-    lr = math.log(ratio)
-    best = BRACKETS[0]
-    best_d = float("inf")
-    for label, r, zshift in BRACKETS:
-        d = abs(lr - math.log(r))
-        if d < best_d:
-            best_d = d
-            best = (label, r, zshift)
-    return best
 
-def _lin(x0, y0, x1, y1, x):
-    if x1 == x0: return y0
-    t = (x - x0) / (x1 - x0)
-    return y0 + t*(y1 - y0)
+class CombatResolution:
+    # Normal distribution parameters
+    MU0 = 50.0
+    SIGMA = 16.5
 
-def _lookup_loss(z: float, bands_z, bands_v) -> float:
-    """Piecewise-linear interpolation with clamping at ends."""
-    if z <= bands_z[0]: return float(bands_v[0])
-    if z >= bands_z[-1]: return float(bands_v[-1])
-    for i in range(1, len(bands_z)):
-        if z <= bands_z[i]:
-            return float(_lin(bands_z[i-1], bands_v[i-1], bands_z[i], bands_v[i], z))
-    return float(bands_v[-1])
+    # z thresholds and corresponding losses
+    Z_BANDS = [-3, -2, -1, 1, 2, 3]
+    DEFENDER_LOSS = [5, 10, 15, 30, 45, 60]
+    ATTACKER_LOSS = [60, 45, 15, 15, 10, 5]
 
-def resolve(attacker_cf: float, defender_cf: float, seed: int | None = None) -> CombatResult:
-    """
-    Resolve one combat using two inputs.
-    - attacker_cf: attacker combat factor (must be > 0)
-    - defender_cf: defender combat factor (must be > 0)
-    Returns a CombatResult with losses (%).
-    """
-    if attacker_cf <= 0 or defender_cf <= 0:
-        raise ValueError("combat factors must be positive")
-    
-    # 1) snap odds
-    ratio = attacker_cf / defender_cf
-    odds_label, odds_ratio, zshift = _nearest_bracket(ratio)
-    
-    # 2) compute bracket mean for the roll
-    mu = MU0 + zshift * SIGMA
-    
-    # 3) roll: Gaussian with mean mu, stdev SIGMA (clamped 1..100)
-    rng = random.Random(seed)
-    roll = rng.gauss(mu, SIGMA)
-    roll = max(1.0, min(100.0, roll))
-    
-    # 4) compute z relative to *neutral* baseline (μ0=50, σ=16.5)
-    z_neutral = (roll - MU0) / SIGMA
-    
-    # 5) lookup losses via neutral z-bands
-    defender_loss = _lookup_loss(z_neutral, TABLE_Z, DEF_LOSS)
-    attacker_loss = _lookup_loss(z_neutral, TABLE_Z, ATT_LOSS)
-    
-    return CombatResult(
-        odds_label=odds_label,
-        odds_ratio=odds_ratio,
-        mu=round(mu, 2),
-        roll=round(roll, 1),
-        z_neutral=round(z_neutral, 2),
-        defender_loss_pct=round(defender_loss),
-        attacker_loss_pct=round(attacker_loss),
-    ) # round(x,1) would return one decimal point
+    # odds brackets (ratio, label, z_shift)
+    ODDS = [
+        (1 / 3.0, "1:3", -0.91),
+        (0.5, "1:2", -0.43),
+        (1.0, "1:1", 0.0),
+        (2.0, "2:1", 0.43),
+        (3.0, "3:1", 0.91),
+    ]
 
-# Tiny demo if executed directly
+    @staticmethod
+    def _snap_ratio(ratio: float):
+        """Find the closest bracket."""
+        return min(CombatResolution.ODDS, key=lambda o: abs(math.log(ratio / o[0])))
+
+    @staticmethod
+    def _gaussian_roll(mu: float, sigma: float) -> float:
+        """Generate one Gaussian roll (clamped to 1–100)."""
+        roll = random.gauss(mu, sigma)
+        return max(1.0, min(100.0, roll))
+
+    @staticmethod
+    def _bucket_loss(z: float):
+        """Return the discrete losses (no interpolation)."""
+        bands = CombatResolution.Z_BANDS
+        defL = CombatResolution.DEFENDER_LOSS
+        attL = CombatResolution.ATTACKER_LOSS
+
+        if z <= bands[0]: return defL[0], attL[0]
+        elif z <= bands[1]: return defL[1], attL[1]
+        elif z <= bands[2]: return defL[2], attL[2]
+        elif z <= bands[3]: return defL[3], attL[3]
+        elif z <= bands[4]: return defL[4], attL[4]
+        else: return defL[5], attL[5]
+
+    @staticmethod
+    def resolve(attackerCF: float, defenderCF: float) -> CombatResult:
+        """Main entrypoint."""
+        ratio = attackerCF / max(0.001, defenderCF)
+        odds_ratio, odds_label, z_shift = CombatResolution._snap_ratio(ratio)
+
+        mu = CombatResolution.MU0 + z_shift * CombatResolution.SIGMA
+        roll = CombatResolution._gaussian_roll(mu, CombatResolution.SIGMA)
+        z_neutral = (roll - CombatResolution.MU0) / CombatResolution.SIGMA
+
+        def_loss, att_loss = CombatResolution._bucket_loss(z_neutral)
+
+        return CombatResult(
+            odds_label=odds_label,
+            odds_ratio=odds_ratio,
+            mu=round(mu, 2),
+            roll=round(roll, 1),
+            z_neutral=round(z_neutral, 2),
+            defender_loss_pct=def_loss,
+            attacker_loss_pct=att_loss,
+        )
+
+
 if __name__ == "__main__":
-    for a, d in [(10,10), (30,10), (10,30), (20,10), (15,10)]:
-        r = resolve(a, d, seed=42)
-        print(f"A={a:>3} D={d:>3} | {r.odds_label:>3} | μ={r.mu:5.1f} roll={r.roll:5.1f} "
-              f"z={r.z_neutral:5.2f} | D%={r.defender_loss_pct:4.1f} A%={r.attacker_loss_pct:4.1f}")
+    # Example runs
+    random.seed(42)
+    for atk, defn in [(10, 10), (20, 10), (10, 20), (30, 10), (10, 30)]:
+        res = CombatResolution.resolve(atk, defn)
+        print(res)

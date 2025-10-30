@@ -22,25 +22,16 @@ class CombatResolution {
     private static let SIGMA = 16.5
 
     private static let TABLE_Z: [Double] = [-3, -2, -1, 0, 1, 2, 3]
-    private static let DEF_LOSS: [Double] = [100, 80, 50, 20, 10, 5, 0]
-    private static let ATT_LOSS: [Double] = [0, 5, 10, 20, 50, 80, 100]
+    private static let DEF_LOSS: [Int]    = [ 3,  5, 10, 15, 20, 30, 40]
+    private static let ATT_LOSS: [Int]    = [40, 30, 20, 15, 10,  5,  3]
 
-    private static let ODDS_BRACKETS: [(label: String, ratio: Double, zShift: Double)] = {
-        // Precomputed zShifts for odds brackets using log scale:
-        // odds: 1:3, 1:2, 1:1, 2:1, 3:1
-        // zShift = (log(odds) - log(1)) / 0.69314718056 (ln(2)) * 1.0 approx
-        // But given the original python code, we use the following approximate values:
-        // We'll compute zShift as ln(ratio)/ln(2)
-        let ratios = [1.0/3.0, 1.0/2.0, 1.0, 2.0, 3.0]
-        return ratios.map { ratio in
-            let label = "\(Int(round(ratio * 100))):100"
-            // Using natural log ratio / ln(2) to get zShift:
-            // Original python used: zShift = log2(ratio)
-            // log2(ratio) = ln(ratio)/ln(2)
-            let zShift = log(ratio)/log(2.0)
-            return (label: "\(Int(round(ratio*1))):\(Int(round(1.0/ratio)))", ratio: ratio, zShift: zShift)
-        }
-    }()
+    private static let ODDS_BRACKETS: [(label: String, ratio: Double, zShift: Double)] = [
+        ("1:3", 1.0/3.0, -0.6745),
+        ("1:2", 1.0/2.0, -0.4307),
+        ("1:1", 1.0,      0.0000),
+        ("2:1", 2.0,      0.4307),
+        ("3:1", 3.0,      0.6745),
+    ]
 
     private static func normalRandom(mu: Double, sigma: Double) -> Double {
         // Box-Muller transform
@@ -56,12 +47,20 @@ class CombatResolution {
         return val
     }
 
-    private static func linearInterp(x: Double, x0: Double, x1: Double, y0: Double, y1: Double) -> Double {
-        if x1 == x0 {
-            return y0
-        }
-        let t = (x - x0) / (x1 - x0)
-        return y0 + t * (y1 - y0)
+    private static func bucketLoss(for z: Double) -> (def: Int, att: Int) {
+        // Bucket intervals (neutral reference):
+        // (-∞, -2] → index 0 (-3σ)
+        // (-2, -1] → index 1 (-2σ)
+        // (-1,  1] → index 3 (0σ)  // entire mid-band maps to 15/15
+        // ( 1,  2] → index 4 (+1σ)
+        // ( 2,  3] → index 5 (+2σ)
+        // ( 3,  ∞) → index 6 (+3σ)
+        if z <= -2.0 { return (DEF_LOSS[0], ATT_LOSS[0]) }
+        if z <= -1.0 { return (DEF_LOSS[1], ATT_LOSS[1]) }
+        if z <=  1.0 { return (DEF_LOSS[3], ATT_LOSS[3]) }
+        if z <=  2.0 { return (DEF_LOSS[4], ATT_LOSS[4]) }
+        if z <=  3.0 { return (DEF_LOSS[5], ATT_LOSS[5]) }
+        return (DEF_LOSS[6], ATT_LOSS[6])
     }
 
     static func resolve(attackerCF: Double, defenderCF: Double, seed: UInt64? = nil) -> CombatResult {
@@ -90,25 +89,8 @@ class CombatResolution {
         // Compute zNeutral
         let zNeutral = (roll - MU0) / SIGMA
 
-        // Interpolate defender and attacker losses
-        // Find index i so that TABLE_Z[i] <= zNeutral <= TABLE_Z[i+1]
-        let z = zNeutral
-        var i = 0
-        while i < TABLE_Z.count - 1 && z > TABLE_Z[i+1] {
-            i += 1
-        }
-        // Clamp i to valid range
-        i = clamp(i, min: 0, max: TABLE_Z.count - 2)
-
-        let z0 = TABLE_Z[i]
-        let z1 = TABLE_Z[i+1]
-        let defLoss0 = DEF_LOSS[i]
-        let defLoss1 = DEF_LOSS[i+1]
-        let attLoss0 = ATT_LOSS[i]
-        let attLoss1 = ATT_LOSS[i+1]
-
-        let defenderLoss = linearInterp(x: z, x0: z0, x1: z1, y0: defLoss0, y1: defLoss1)
-        let attackerLoss = linearInterp(x: z, x0: z0, x1: z1, y0: attLoss0, y1: attLoss1)
+        // Bucketed losses (no interpolation)
+        let (defenderLoss, attackerLoss) = bucketLoss(for: zNeutral)
 
         return CombatResult(
             oddsLabel: nearest.label,
@@ -116,9 +98,8 @@ class CombatResolution {
             mu: mu,
             roll: roll,
             zNeutral: zNeutral,
-            defenderLossPct: Int(round(defenderLoss)),
-            attackerLossPct: Int(round(attackerLoss))
+            defenderLossPct: defenderLoss,
+            attackerLossPct: attackerLoss
         )
     }
 }
-
