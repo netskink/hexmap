@@ -392,10 +392,23 @@ private extension GameScene {
         unit.userData?["HP"] = hp
         updateHealthBar(for: unit)
         if hp <= 0 {
+            // Immediately remove from arrays so subsequent UI/logic doesn't see a ghost unit.
+            if let idx = blueUnits.firstIndex(of: unit) { blueUnits.remove(at: idx) }
+            if let idx = redUnits.firstIndex(of: unit) { redUnits.remove(at: idx) }
+            // Stop any dimming used for attack hints
+            unit.removeAction(forKey: "DimForAttackHint")
+            // Play death animation and then remove the node
             unit.run(.sequence([.fadeOut(withDuration: 0.2), .removeFromParent()]))
+            return
         }
     }
-    
+
+    /// Removes any units from tracking arrays that have been removed from the scene or have 0 HP, and cleans dimmed targets.
+    func pruneDestroyedUnits() {
+        blueUnits.removeAll { $0.parent == nil || (( $0.userData?["HP"] as? NSNumber)?.intValue ?? 1) <= 0 }
+        redUnits.removeAll  { $0.parent == nil || (( $0.userData?["HP"] as? NSNumber)?.intValue ?? 1) <= 0 }
+        dimmedTargets.removeAll { $0.parent == nil }
+    }
 }
 
 
@@ -810,6 +823,32 @@ class GameScene: SKScene {
                     let targetWorld = worldPointForTile(col: target.0, row: target.1)
                     playExplosion(at: targetWorld, on: worldNode)
                     playSmokePuff(at: targetWorld, on: worldNode)          // smoke at target
+                    
+                    // --- Combat resolution ---
+                    let attacker = actingUnit
+                    
+                        // Find the defending unit on the attacked tile
+                        if let defender = redUnits.first(where: { tileIndex(of: $0) == target }) {
+                            let atkCF = combatFactor(for: attacker)
+                            let defCF = combatFactor(for: defender)
+
+                            let result = CombatResolution.resolve(attackerCF: Double(atkCF), defenderCF: Double(defCF))
+
+                            // Compute damage as % of MaxHP
+                            let defMaxHP = (defender.userData?["MaxHP"] as? NSNumber)?.intValue ?? 100
+                            let atkMaxHP = (attacker.userData?["MaxHP"] as? NSNumber)?.intValue ?? 100
+
+                            let defDamage = Int(Double(defMaxHP) * Double(result.defenderLossPct) / 100.0)
+                            let atkDamage = Int(Double(atkMaxHP) * Double(result.attackerLossPct) / 100.0)
+
+                            applyDamage(defDamage, to: defender)
+                            applyDamage(atkDamage, to: attacker)
+
+                            pruneDestroyedUnits()
+
+                            print("⚔️ Combat \(result.oddsLabel) | Roll=\(result.roll) | Def-\(result.defenderLossPct)% (\(defDamage)) / Att-\(result.attackerLossPct)% (\(atkDamage))")
+                        }
+                    
 
                     clearMoveHighlights()
                     endTurn()
@@ -996,6 +1035,27 @@ class GameScene: SKScene {
             playSmokePuff(at: attackerWorld, on: worldNode)    // smoke at attacker
             playExplosion(at: targetWorld, on: worldNode)
             playSmokePuff(at: targetWorld, on: worldNode)      // smoke at target
+            
+            // --- Combat resolution (AI) ---
+            if let defender = blueUnits.first(where: { tileIndex(of: $0) == targetAdj }) {
+                let atkCF = combatFactor(for: unit)
+                let defCF = combatFactor(for: defender)
+                let result = CombatResolution.resolve(attackerCF: Double(atkCF),
+                                                     defenderCF: Double(defCF))
+
+                let defMaxHP = (defender.userData?["MaxHP"] as? NSNumber)?.intValue ?? 100
+                let atkMaxHP = (unit.userData?["MaxHP"] as? NSNumber)?.intValue ?? 100
+
+                let defDamage = Int(Double(defMaxHP) * Double(result.defenderLossPct) / 100.0)
+                let atkDamage = Int(Double(atkMaxHP) * Double(result.attackerLossPct) / 100.0)
+
+                applyDamage(defDamage, to: defender)
+                applyDamage(atkDamage, to: unit)
+                pruneDestroyedUnits()
+
+                print("🤖 Combat \(result.oddsLabel) | Roll=\(result.roll) | Def-\(result.defenderLossPct)% (\(defDamage)) / Att-\(result.attackerLossPct)% (\(atkDamage))")
+            }
+            
             if debugTurnLogs { print("🤖 AI attacking then ending turn") }
             endTurn()
             return
@@ -1145,6 +1205,7 @@ class GameScene: SKScene {
         }
         // Mirror the scene's normal end-turn flow: clear hints and hand control to the existing AI.
         clearMoveHighlights()
+        pruneDestroyedUnits()
         endTurn()          // This switches to .computer, disables input, and calls the real AI (runComputerTurn()).
         completion()       // HUD can re-enable immediately; AI will flip back to player when done.
     }
