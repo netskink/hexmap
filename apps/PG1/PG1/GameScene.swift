@@ -96,17 +96,17 @@ private extension GameScene {
     }
     
     // MARK: - Motorized rules helpers
-    /// Returns true if the given unit should use the motorized rule set (Armor/MechanizedInfantry/MotorizedInfantry).
+    /// Returns true if this unit is marked motorized via userData["IsMotorized"].
+    /// Accepts NSNumber(0/1), Bool, or String "0"/"1"/"true"/"false" (case-insensitive).
     func isMotorizedUnit(_ node: SKSpriteNode) -> Bool {
-        // Our spawnUnit() sets name as "<PrototypeName>_<UUID>", so use the prefix
-        guard let name = node.name else { return false }
-        let type = name.split(separator: "_").first.map(String.init) ?? ""
-        switch type {
-        case "Armor", "MechanizedInfantry", "MotorizedInfantry":
-            return true
-        default:
-            return false
+        guard let ud = node.userData else { return false }
+        if let n = ud["IsMotorized"] as? NSNumber { return n.intValue != 0 }
+        if let b = ud["IsMotorized"] as? Bool { return b }
+        if let s = ud["IsMotorized"] as? String {
+            let v = s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return v == "1" || v == "true" || v == "yes"
         }
+        return false
     }
 
     /// Checks the tile definition userData for key "AM" and returns true only when AM == 1.
@@ -136,12 +136,13 @@ private extension GameScene {
     }
 
     /// Neighbor generator that applies walkability + occupancy and the motorized rule.
-    /// For motorized units (Armor/MechanizedInfantry/MotorizedInfantry), a neighbor is allowed if
+    /// Motorized status comes from unit.userData["IsMotorized"] (see isMotorizedUnit(_:)).
+    /// For motorized units, a neighbor is allowed if:
     ///   - it is in-bounds
     ///   - it is not occupied
-    ///   - If AM == 0 on the tile: forbid (even if walkable)
+    ///   - If tile userData["AM"] == 0: forbid (even if walkable)
     ///   - Else allow if (baseMap.isWalkable == true) OR (AM == 1)
-    /// For all other units, the neighbor must satisfy baseMap.isWalkable == true.
+    /// For non-motorized units, the neighbor must satisfy baseMap.isWalkable == true.
     func allowedNeighborTiles(for unit: SKSpriteNode,
                               from col: Int,
                               row: Int,
@@ -161,6 +162,31 @@ private extension GameScene {
                     return baseMap.isWalkable(col: neighbor.col, row: neighbor.row)
                 }
             }
+    }
+
+    // MARK: - Combat helpers
+    /// Reads an integer combat factor from unit.userData["CombatFactor"]. Defaults to 1 if missing/invalid.
+    func combatFactor(for unit: SKSpriteNode) -> Int {
+        guard let ud = unit.userData else { return 1 }
+        if let n = ud["CombatFactor"] as? NSNumber { return max(1, n.intValue) }
+        if let i = ud["CombatFactor"] as? Int { return max(1, i) }
+        if let s = ud["CombatFactor"] as? String, let i = Int(s.trimmingCharacters(in: .whitespacesAndNewlines)) { return max(1, i) }
+        return 1
+    }
+
+    /// Greatest common divisor for reducing odds ratios.
+    func gcd(_ a: Int, _ b: Int) -> Int {
+        var x = abs(a), y = abs(b)
+        while y != 0 { let t = x % y; x = y; y = t }
+        return max(1, x)
+    }
+
+    /// Returns an odds string like "1:2", "2:1" by reducing the attacker:defender ratio.
+    func oddsString(attacker atk: SKSpriteNode, defender def: SKSpriteNode) -> String {
+        let a = max(1, combatFactor(for: atk))
+        let d = max(1, combatFactor(for: def))
+        let g = gcd(a, d)
+        return "\(a / g):\(d / g)"
     }
 
     // MARK: - Occupancy helpers
@@ -279,6 +305,16 @@ private extension GameScene {
         return proto
     }
 
+    /// Clone the AttackHint prototype from UI.sks. Falls back to nil if not found.
+    func makeAttackHintInstance() -> SKNode? {
+        guard let proto = uiRoot?.childNode(withName: "//AttackHint")?.copy() as? SKNode else {
+            return nil
+        }
+        proto.name = attackHighlightName
+        proto.zPosition = 1001
+        return proto
+    }
+
     /// Position the health bar just above the unit sprite
     func positionHealthBar(_ bar: SKNode, over unit: SKSpriteNode) {
         let offset: CGFloat = (unit.size.height * 0.5) + 10
@@ -356,10 +392,23 @@ private extension GameScene {
         unit.userData?["HP"] = hp
         updateHealthBar(for: unit)
         if hp <= 0 {
+            // Immediately remove from arrays so subsequent UI/logic doesn't see a ghost unit.
+            if let idx = blueUnits.firstIndex(of: unit) { blueUnits.remove(at: idx) }
+            if let idx = redUnits.firstIndex(of: unit) { redUnits.remove(at: idx) }
+            // Stop any dimming used for attack hints
+            unit.removeAction(forKey: "DimForAttackHint")
+            // Play death animation and then remove the node
             unit.run(.sequence([.fadeOut(withDuration: 0.2), .removeFromParent()]))
+            return
         }
     }
-    
+
+    /// Removes any units from tracking arrays that have been removed from the scene or have 0 HP, and cleans dimmed targets.
+    func pruneDestroyedUnits() {
+        blueUnits.removeAll { $0.parent == nil || (( $0.userData?["HP"] as? NSNumber)?.intValue ?? 1) <= 0 }
+        redUnits.removeAll  { $0.parent == nil || (( $0.userData?["HP"] as? NSNumber)?.intValue ?? 1) <= 0 }
+        dimmedTargets.removeAll { $0.parent == nil }
+    }
 }
 
 
@@ -383,6 +432,12 @@ enum Team { case player, computer }
 ///   - Player taps a hint → move unit → `endTurn()`
 ///   - Computer runs a BFS step toward the player, then `endTurn()`
 class GameScene: SKScene {
+    
+    // Debug logging toggle
+    let debugTurnLogs = true
+
+    /// Delay between player ending turn and AI starting (seconds)
+    let aiTurnDelay: TimeInterval = 0.6
 
     // MARK: Nodes
 
@@ -424,13 +479,19 @@ class GameScene: SKScene {
     /// Separate from the map so hints aren’t affected by per-tile z ordering.
     var overlayNode: SKNode!
 
-    /// Currently active hint sprites (named `highlightName`).
-    var highlightNodes: [SKSpriteNode] = []
+    /// Currently active hint nodes (move + attack). Tracked for full cleanup.
+    var highlightNodes: [SKNode] = []
 
     /// Node.name used to detect taps on move hints.
     let highlightName = "moveHint"
     /// Texture asset name used for hint sprites.
     let highlightTextureName = "whitebe"
+    /// Node.name used to tag attackable (adjacent enemy) hint sprites.
+    let attackHighlightName = "attackHint"
+    /// Texture asset name used for attack hint sprites.
+    let attackHighlightTextureName = "redbe"
+    /// Enemy units temporarily dimmed while attack hints are visible
+    private var dimmedTargets: [SKSpriteNode] = []
 
     // MARK: State
 
@@ -659,6 +720,62 @@ class GameScene: SKScene {
     func worldPointForTile(col: Int, row: Int) -> CGPoint {
         worldNode.convert(baseMap.centerOfTile(atColumn: col, row: row), from: baseMap)
     }
+    
+    
+    func playMuzzleFlash(at point: CGPoint, on parent: SKNode) {
+        var frames: [SKTexture] = []
+        for i in 1...8 { frames.append(SKTexture(imageNamed: String(format: "muzzle_%04d", i))) }
+        let sprite = SKSpriteNode(texture: frames.first)
+        sprite.zPosition = 1200
+        sprite.position = point
+        parent.addChild(sprite)
+        // Slower, brighter muzzle flash
+        sprite.blendMode = .add
+        let anim = SKAction.animate(with: frames, timePerFrame: 0.08, resize: false, restore: false)
+        let scaleUp = SKAction.scale(to: 1.2, duration: 0.08 * Double(frames.count) * 0.4)
+        let fadeOut = SKAction.fadeOut(withDuration: 0.1)
+        sprite.run(.sequence([.group([anim, scaleUp]), fadeOut, .removeFromParent()]))
+    }
+    
+    func playSmokePuff(at point: CGPoint, on parent: SKNode) {
+        if let smoke = SKEmitterNode(fileNamed: "Smoke.sks") {
+            smoke.position = point
+            smoke.zPosition = 1190
+            parent.addChild(smoke)
+            smoke.run(.sequence([.wait(forDuration: 2.0), .removeFromParent()]))
+        }
+    }
+
+    func playExplosion(at point: CGPoint, on parent: SKNode) {
+        var frames: [SKTexture] = []
+        for i in 1...12 { frames.append(SKTexture(imageNamed: String(format: "explosion_%04d", i))) }
+        let sprite = SKSpriteNode(texture: frames.first)
+        sprite.zPosition = 1200
+        sprite.position = point
+        parent.addChild(sprite)
+        // Slightly longer explosion for readability
+        sprite.blendMode = .add
+        let timePerFrame = 0.07
+        let anim = SKAction.animate(with: frames, timePerFrame: timePerFrame, resize: false, restore: false)
+        let scaleUp = SKAction.scale(to: 1.25, duration: timePerFrame * Double(frames.count) * 0.6)
+        let fadeOut = SKAction.fadeOut(withDuration: 0.12)
+
+        // --- Explosion audio (Explosion.caf) ---
+        // Play the sound only for the visual duration (animation + fade), then remove the node.
+        let totalExplosionDuration = timePerFrame * Double(frames.count) + 0.12
+        let explosionAudio = SKAudioNode(fileNamed: "Explosion.caf")
+        explosionAudio.name = "ExplosionSFX"
+        explosionAudio.autoplayLooped = false
+        explosionAudio.isPositional = true
+        explosionAudio.position = point
+        parent.addChild(explosionAudio)
+        let playExplosion = SKAction.play()
+        let stopAndRemoveExplosion = SKAction.sequence([.wait(forDuration: totalExplosionDuration), .removeFromParent()])
+        explosionAudio.run(.sequence([playExplosion, stopAndRemoveExplosion]))
+
+        // Run visuals
+        sprite.run(.sequence([.group([anim, scaleUp]), fadeOut, .removeFromParent()]))
+    }
 
     // MARK: - Touches
 
@@ -670,6 +787,75 @@ class GameScene: SKScene {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard currentTurn == .player, !isAnimatingMove, let touch = touches.first else { return }
         let scenePt = touch.location(in: self)
+        
+        if debugTurnLogs { print("👆 touchesEnded at \(scenePt), turn=\(currentTurn), anim=\(isAnimatingMove)") }
+
+        // 0) If an attack hint (or any of its children) was tapped, perform an attack (no move), then end turn.
+        if let actingUnit = selectedUnit {
+            // Find any node under the touch, then climb ancestors to find an AttackHint container
+            if let touched = nodes(at: scenePt).first {
+                var node: SKNode? = touched
+                var attackNode: SKNode?
+                while let n = node {
+                    if n.name == attackHighlightName { attackNode = n; break }
+                    node = n.parent
+                }
+                if let attackNode = attackNode {
+                    // Determine the map tile that was attacked
+                    let hintWorld: CGPoint
+                    if attackNode.parent === overlayNode {
+                        hintWorld = overlayNode.convert(attackNode.position, to: worldNode)
+                    } else if let p = attackNode.parent {
+                        hintWorld = p.convert(attackNode.position, to: worldNode)
+                    } else {
+                        hintWorld = attackNode.position
+                    }
+                    let hintMap   = baseMap.convert(hintWorld, from: worldNode)
+                    let target    = (baseMap.tileColumnIndex(fromPosition: hintMap),
+                                     baseMap.tileRowIndex(fromPosition: hintMap))
+
+                    if debugTurnLogs { print("➡️ Attack tap detected") }
+                    print("🗡️ Player attack initiated by blue unit at target tile (\(target.0), \(target.1))")
+
+                    // FX (attacker + target)
+                    playMuzzleFlash(at: actingUnit.position, on: worldNode)
+                    playSmokePuff(at: actingUnit.position, on: worldNode)   // smoke at attacker
+                    let targetWorld = worldPointForTile(col: target.0, row: target.1)
+                    playExplosion(at: targetWorld, on: worldNode)
+                    playSmokePuff(at: targetWorld, on: worldNode)          // smoke at target
+                    
+                    // --- Combat resolution ---
+                    let attacker = actingUnit
+                    
+                        // Find the defending unit on the attacked tile
+                        if let defender = redUnits.first(where: { tileIndex(of: $0) == target }) {
+                            let atkCF = combatFactor(for: attacker)
+                            let defCF = combatFactor(for: defender)
+
+                            let result = CombatResolution.resolve(attackerCF: Double(atkCF), defenderCF: Double(defCF))
+
+                            // Compute damage as % of MaxHP
+                            let defMaxHP = (defender.userData?["MaxHP"] as? NSNumber)?.intValue ?? 100
+                            let atkMaxHP = (attacker.userData?["MaxHP"] as? NSNumber)?.intValue ?? 100
+
+                            let defDamage = Int(Double(defMaxHP) * Double(result.defenderLossPct) / 100.0)
+                            let atkDamage = Int(Double(atkMaxHP) * Double(result.attackerLossPct) / 100.0)
+
+                            applyDamage(defDamage, to: defender)
+                            applyDamage(atkDamage, to: attacker)
+
+                            pruneDestroyedUnits()
+
+                            print("⚔️ Combat \(result.oddsLabel) | Roll=\(result.roll) | Def-\(result.defenderLossPct)% (\(defDamage)) / Att-\(result.attackerLossPct)% (\(atkDamage))")
+                        }
+                    
+
+                    clearMoveHighlights()
+                    endTurn()
+                    return
+                }
+            }
+        }
 
         // 1) If a highlight was tapped, move the selected unit there (convert from overlay -> world -> map safely)
         if let tapped = nodes(at: scenePt).first(where: { $0.name == highlightName }) as? SKSpriteNode,
@@ -684,6 +870,8 @@ class GameScene: SKScene {
             if isTileOccupied(col: target.0, row: target.1, excluding: movingUnit) {
                 return
             }
+            
+            if debugTurnLogs { print("➡️ Move tap detected; target=\(target)") }
             
             clearMoveHighlights()
             moveUnit(movingUnit, toCol: target.0, row: target.1) { [weak self] in self?.endTurn() }
@@ -713,6 +901,12 @@ class GameScene: SKScene {
     func clearMoveHighlights() {
         highlightNodes.forEach { $0.removeFromParent() }
         highlightNodes.removeAll()
+        // Restore any units we dimmed for readability
+        for u in dimmedTargets {
+            u.removeAction(forKey: "DimForAttackHint")
+            u.run(.fadeAlpha(to: 1.0, duration: 0.08))
+        }
+        dimmedTargets.removeAll()
     }
 
     /// Displays move hint sprites on all **reachable tiles** within the selected unit's movement points.
@@ -727,12 +921,60 @@ class GameScene: SKScene {
         let reachable = reachableTiles(for: unit, from: start, movePoints: mp, occupied: occ)
             .filter { !($0.0 == start.col && $0.1 == start.row) }
 
-        // Render hints
+        // Render move hints
         for (c, r) in reachable {
             let hint = SKSpriteNode(texture: SKTexture(imageNamed: highlightTextureName))
             hint.name = highlightName
             hint.alpha = 0.85
             hint.position = worldNode.convert(baseMap.centerOfTile(atColumn: c, row: r), from: baseMap)
+            overlayNode.addChild(hint)
+            highlightNodes.append(hint)
+        }
+
+        // Render attack hints (adjacent enemy-occupied tiles only).
+        // Build a fast lookup map of red unit tile indices → unit node.
+        var redAt: [Offset: SKSpriteNode] = [:]
+        for enemy in redUnits {
+            let idx = tileIndex(of: enemy)
+            redAt[Offset(col: idx.col, row: idx.row)] = enemy
+        }
+
+        // Adjacent (nearest-neighbor) tiles from the selected unit's start.
+        let adjacents = offsetNeighbors(col: start.col, row: start.row)
+            .filter { inBounds(col: $0.col, row: $0.row) }
+
+        // Use the AttackHint prototype from UI.sks (with built-in shadows and layout)
+        for (c, r) in adjacents {
+            let key = Offset(col: c, row: r)
+            guard let defender = redAt[key] else { continue }
+            guard let hint = makeAttackHintInstance() else { continue }
+
+            // Position centered on the target tile
+            hint.position = worldNode.convert(baseMap.centerOfTile(atColumn: c, row: r), from: baseMap)
+            hint.alpha = 0.98
+
+            // Update odds text on both label and its shadow, if present
+            let odds = oddsString(attacker: unit, defender: defender)
+            if let label = hint.childNode(withName: "oddsLabel") as? SKLabelNode {
+                label.text = odds
+            }
+            if let shadow = hint.childNode(withName: "oddsLabelShadow") as? SKLabelNode {
+                shadow.text = odds
+            }
+
+            // Optional: scale to approximate tile size if the prototype provides a BaseDiameter in userData
+            // Otherwise, you can size the AttackHint visually in UI.sks and remove this block.
+            if let base = (hint.userData?["BaseDiameter"] as? NSNumber)?.doubleValue {
+                let target = Double(min(baseMap.tileSize.width, baseMap.tileSize.height) * 0.9)
+                let scale = CGFloat(max(0.1, target / base))
+                hint.setScale(scale)
+            }
+
+            // Dim the defender to make the red ring/odds stand out
+            defender.removeAction(forKey: "DimForAttackHint")
+            defender.run(.fadeAlpha(to: 0.35, duration: 0.08), withKey: "DimForAttackHint")
+            if !dimmedTargets.contains(defender) { dimmedTargets.append(defender) }
+
             overlayNode.addChild(hint)
             highlightNodes.append(hint)
         }
@@ -752,7 +994,11 @@ class GameScene: SKScene {
         case .player:
             currentTurn = .computer
             enablePlayerInput(false)
-            runComputerTurn()
+            if debugTurnLogs { print("🔁 Switching to Computer turn…") }
+            // Defer AI start to create a readable inter-turn pause and avoid re-entrancy with SKAction completions / FX
+            run(.wait(forDuration: aiTurnDelay)) { [weak self] in
+                self?.runComputerTurn()
+            }
         case .computer:
             currentTurn = .player
             enablePlayerInput(true)
@@ -767,10 +1013,53 @@ class GameScene: SKScene {
     ///   one tile toward the blue unit; otherwise ends its turn.
     func runComputerTurn() {
         guard !redUnits.isEmpty else { endTurn(); return }
+        
+        if debugTurnLogs { print("🤖 Computer turn starting (reds=\(redUnits.count))") }
+        
 
         // Choose the next red unit in a round-robin sequence.
         let unit = redUnits[aiUnitTurnIndex % redUnits.count]
         aiUnitTurnIndex += 1
+
+        // If any blue unit is adjacent, perform an attack instead of moving.
+        let redIdx = tileIndex(of: unit)
+        let adjacentsToRed = offsetNeighbors(col: redIdx.col, row: redIdx.row)
+            .filter { inBounds(col: $0.col, row: $0.row) }
+        let bluePositions = Set(blueUnits.map { Offset(col: tileIndex(of: $0).col, row: tileIndex(of: $0).row) })
+        if let targetAdj = adjacentsToRed.first(where: { bluePositions.contains(Offset(col: $0.col, row: $0.row)) }) {
+            print("🗡️ Computer attack initiated by red unit adjacent to (\(redIdx.col), \(redIdx.row))")
+            // FX: muzzle flash + smoke at attacker, explosion + smoke at target (both in world space)
+            let attackerWorld = worldPointForTile(col: redIdx.col, row: redIdx.row)
+            let targetWorld = worldPointForTile(col: targetAdj.col, row: targetAdj.row)
+            playMuzzleFlash(at: attackerWorld, on: worldNode)
+            playSmokePuff(at: attackerWorld, on: worldNode)    // smoke at attacker
+            playExplosion(at: targetWorld, on: worldNode)
+            playSmokePuff(at: targetWorld, on: worldNode)      // smoke at target
+            
+            // --- Combat resolution (AI) ---
+            if let defender = blueUnits.first(where: { tileIndex(of: $0) == targetAdj }) {
+                let atkCF = combatFactor(for: unit)
+                let defCF = combatFactor(for: defender)
+                let result = CombatResolution.resolve(attackerCF: Double(atkCF),
+                                                     defenderCF: Double(defCF))
+
+                let defMaxHP = (defender.userData?["MaxHP"] as? NSNumber)?.intValue ?? 100
+                let atkMaxHP = (unit.userData?["MaxHP"] as? NSNumber)?.intValue ?? 100
+
+                let defDamage = Int(Double(defMaxHP) * Double(result.defenderLossPct) / 100.0)
+                let atkDamage = Int(Double(atkMaxHP) * Double(result.attackerLossPct) / 100.0)
+
+                applyDamage(defDamage, to: defender)
+                applyDamage(atkDamage, to: unit)
+                pruneDestroyedUnits()
+
+                print("🤖 Combat \(result.oddsLabel) | Roll=\(result.roll) | Def-\(result.defenderLossPct)% (\(defDamage)) / Att-\(result.attackerLossPct)% (\(atkDamage))")
+            }
+            
+            if debugTurnLogs { print("🤖 AI attacking then ending turn") }
+            endTurn()
+            return
+        }
 
         // Pick a goal: the nearest blue unit by true hex (cube) distance.
         func distance(_ a: (Int, Int), _ b: (Int, Int)) -> Int {
@@ -778,9 +1067,8 @@ class GameScene: SKScene {
             let cb = cubeFrom(col: b.0, row: b.1)
             return cubeDistance(ca, cb)
         }
-        let redPos = tileIndex(of: unit)
         let blueTargets = blueUnits.map { tileIndex(of: $0) }
-        let goal = blueTargets.min(by: { distance(redPos, $0) < distance(redPos, $1) })
+        let goal = blueTargets.min(by: { distance(redIdx, $0) < distance(redIdx, $1) })
 
         if let g = goal {
             let start = tileIndex(of: unit)
@@ -791,7 +1079,8 @@ class GameScene: SKScene {
             // choose the best adjacent, unoccupied approach tile instead.
             let occ = occupiedOffsets(excluding: unit)
 
-            // Candidates: all unoccupied neighbors around the goal that are legal for this unit (walkable OR AM == false if motorized)
+            // Candidates: all unoccupied neighbors around the goal that are legal for this unit
+            // (non-motorized: walkable; motorized: walkable OR AM == 1, and rejected if AM == 0).
             let allNbrs = offsetNeighbors(col: g.0, row: g.1)
                 .filter { inBounds(col: $0.col, row: $0.row) }
                 .filter { !occ.contains(Offset(col: $0.col, row: $0.row)) }
@@ -825,9 +1114,11 @@ class GameScene: SKScene {
                 moveUnit(unit, toCol: targetIdx.0, row: targetIdx.1) { [weak self] in self?.endTurn() }
             } else {
                 // Nowhere legal to go
+                if debugTurnLogs { print("🤖 AI found no path; ending turn") }
                 endTurn()
             }
         } else {
+            if debugTurnLogs { print("🤖 No blue targets; ending turn") }
             endTurn()
         }
     }
@@ -837,19 +1128,70 @@ class GameScene: SKScene {
     /// Animates `unit` to the tile at `(col,row)` and invokes `completion`
     /// when the short move action finishes. Sets `isAnimatingMove` to gate input.
     func moveUnit(_ unit: SKSpriteNode, toCol col: Int, row: Int, completion: @escaping () -> Void) {
-        
         // Enforce no stacking at runtime
         if isTileOccupied(col: col, row: row, excluding: unit) {
             completion()
             return
         }
-        
+
         let pWorld = worldPointForTile(col: col, row: row)
+        
+        // If we're already at (or extremely close to) the destination, finish immediately.
+        let epsilon: CGFloat = 0.5
+        let dx = unit.position.x - pWorld.x
+        let dy = unit.position.y - pWorld.y
+        if abs(dx) < epsilon && abs(dy) < epsilon {
+            if debugTurnLogs { print("🟰 Already at destination (\(col), \(row)); skipping move") }
+            completion()
+            return
+        }
+        
+        // Ensure no lingering actions block completion and no nodes are paused.
+        unit.removeAllActions()
+        unit.isPaused = false
+        worldNode.isPaused = false
+        self.isPaused = false
+        
         isAnimatingMove = true
-        unit.run(.move(to: pWorld, duration: 0.25)) { [weak self] in
-            self?.isAnimatingMove = false
+        if debugTurnLogs {
+            let parentName = unit.parent?.name ?? "nil"
+            print("🚚 Begin move to (\(col), \(row)) from \(unit.position) → \(pWorld) (parent=\(parentName))")
+        }
+        
+        // Use an explicit sequence to guarantee the completion runs.
+        let move = SKAction.move(to: pWorld, duration: 1.5)
+        move.timingMode = .easeInEaseOut
+
+        // Clean up any lingering marching node from a previous move
+        unit.childNode(withName: "MarchSFX")?.removeFromParent()
+
+        // Play marching sound only for the duration of the move using SKAudioNode.
+        // Removing the node after `move.duration` cleanly stops playback even if the
+        // source file is longer.
+        let marchNode = SKAudioNode(fileNamed: "InfMarch.caf")
+        marchNode.name = "MarchSFX"
+        marchNode.autoplayLooped = true
+        marchNode.isPositional = false
+
+        let startSound = SKAction.run { [weak unit] in
+            guard let unit = unit else { return }
+            // Ensure no duplicate
+            unit.childNode(withName: "MarchSFX")?.removeFromParent()
+            unit.addChild(marchNode)
+        }
+        let stopSound = SKAction.run {
+            marchNode.removeFromParent()
+        }
+        let soundForMoveDuration = SKAction.sequence([startSound, .wait(forDuration: move.duration), stopSound])
+        let moveWithSound = SKAction.group([move, soundForMoveDuration])
+
+        let finished = SKAction.run { [weak self] in
+            guard let self = self else { return }
+            self.isAnimatingMove = false
+            if self.debugTurnLogs { print("✅ Move finished at (\(col), \(row)) pos=\(unit.position)") }
             completion()
         }
+        unit.run(.sequence([moveWithSound, finished]), withKey: "MoveUnit")
     }
     
     // MARK: - Turn flow API called from HUD
@@ -863,6 +1205,7 @@ class GameScene: SKScene {
         }
         // Mirror the scene's normal end-turn flow: clear hints and hand control to the existing AI.
         clearMoveHighlights()
+        pruneDestroyedUnits()
         endTurn()          // This switches to .computer, disables input, and calls the real AI (runComputerTurn()).
         completion()       // HUD can re-enable immediately; AI will flip back to player when done.
     }

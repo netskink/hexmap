@@ -185,4 +185,20 @@
          </FileRef>
       </Group>
    </Group>
+   <Group
+      location = "group:utils"
+      name = "utils">
+      <FileRef
+         location = "group:combat_resolution_simple.py">
+      </FileRef>
+      <FileRef
+         location = "group:test_run.py">
+      </FileRef>
+      <FileRef
+         location = "group:README.md">
+      </FileRef>
+      <FileRef
+         location = "group:combat_resolution.py">
+      </FileRef>
+   </Group>
 </Workspace>
